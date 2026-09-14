@@ -1,8 +1,8 @@
-# Quittance
+# Inqutum
 
 Invoice on Stellar. Get paid. Keep the proof.
 
-Quittance helps freelancers create an invoice, accept payment via link or QR on Stellar, verify it on Horizon (memo + amount + destination), then **download or email payment proof**. Settlement stays on-chain. Quittance does not expose other people’s wallet identity or history.
+Inqutum helps freelancers create an invoice, accept payment via link or QR on Stellar, verify it on Horizon (memo + amount + destination), then **download or email payment proof**. Settlement stays on-chain. Inqutum does not expose other people’s wallet identity or history.
 
 **Sharp initial user:** freelancer invoicing a client in XLM/USDC on Stellar.
 
@@ -133,7 +133,7 @@ boundary is documented in [`docs/LATE_PAYMENT_POLICY.md`](./docs/LATE_PAYMENT_PO
 
 ### Multi-Asset (XLM & USDC) Support
 
-Quittance supports multi-asset invoicing across native XLM and credit assets such as USDC on Stellar:
+Inqutum supports multi-asset invoicing across native XLM and credit assets such as USDC on Stellar:
 - **Native XLM**: No issuer required, verified directly with native payment operations.
 - **Credit Assets (e.g. USDC)**: Verified with `asset_type`, `asset_code`, and pinned `asset_issuer`.
 - **Trustline UX**: The pay flow inspects trustline status and provides actionable guidance (`op_no_trust` handling) if the buyer wallet needs to add a trustline.
@@ -205,8 +205,8 @@ Only use your public `G...` address with Friendbot. Never paste a secret key or 
 Follow these steps from a fresh clone. Use **two terminals** so the backend and frontend can run at the same time.
 
 ```bash
-git clone https://github.com/Kappa16/Quittance0.git
-cd Quittance0
+git clone https://github.com/BigDella/inqutum.git
+cd inqutum
 ```
 
 ### 1) Backend API
@@ -268,7 +268,7 @@ payment proofs, follow the [in-memory to Postgres cutover plan](./docs/POSTGRES_
 In `backend/.env` (template: `backend/env.example.txt`):
 
 ```
-DATABASE_URL=postgresql://user:password@localhost:5432/quittance
+DATABASE_URL=postgresql://user:password@localhost:5432/inqutum
 ```
 
 `SELLER_PUBLIC_KEY` / `SELLER_SECRET_KEY` are **optional**. They are only used by
@@ -313,7 +313,7 @@ cd backend
 npm run typecheck                                                     # TypeScript compile check (no emit)
 npm test                                                              # unit + scoping + parity tests
 npm run test:isolated                                                 # standalone regression tests in tests/isolated
-DATABASE_URL=postgresql://user:password@localhost:5432/quittance_test npm test   # adds the Postgres integration test
+DATABASE_URL=postgresql://user:password@localhost:5432/inqutum_test npm test   # adds the Postgres integration test
 ```
 
 The integration test (`backend/tests/invoice-postgres.integration.test.ts`) is
