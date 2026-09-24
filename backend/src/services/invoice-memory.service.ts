@@ -45,6 +45,11 @@ export class InvoiceMemoryService {
     return invoice ?? null;
   }
 
+  async getInvoiceByTxHash(txHash: string): Promise<StoredInvoice | null> {
+    const invoice = this.storage.getInvoiceByTxHash(txHash);
+    return invoice ?? null;
+  }
+
   async markAsPaid(
     invoiceId: string,
     txHash: string,

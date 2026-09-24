@@ -9,6 +9,7 @@ type Invoice = StoredInvoice;
 class MemoryStorage {
   private invoices: Map<string, Invoice> = new Map();
   private invoicesByMemo: Map<string, string> = new Map(); // memo -> invoice id
+  private invoicesByTxHash: Map<string, string> = new Map(); // txHash -> invoice id
 
   createInvoice(data: Partial<Invoice>): Invoice {
     const invoice: Invoice = {
@@ -49,6 +50,21 @@ class MemoryStorage {
     return id ? this.invoices.get(id) : undefined;
   }
 
+  // Get invoice by txHash
+  getInvoiceByTxHash(txHash: string): Invoice | undefined {
+    this.markExpiredInvoices();
+    const id = this.invoicesByTxHash.get(txHash);
+    if (id) {
+      return this.invoices.get(id);
+    }
+    for (const inv of this.invoices.values()) {
+      if (inv.paymentTxHash === txHash) {
+        return inv;
+      }
+    }
+    return undefined;
+  }
+
   // Update invoice
   updateInvoice(id: string, updates: Partial<Invoice>): Invoice | undefined {
     const invoice = this.invoices.get(id);
@@ -71,8 +87,25 @@ class MemoryStorage {
     this.markExpiredInvoices();
     const now = new Date();
     const invoice = this.invoices.get(id);
-    if (!invoice || invoice.status !== 'PENDING') return undefined;
+    if (!invoice) return undefined;
+
+    // Idempotent re-verification for the same invoice with the same txHash
+    if (invoice.status === 'PAID' && invoice.paymentTxHash === txHash) {
+      return invoice;
+    }
+
+    // Check if txHash has already been consumed by a different invoice
+    const existingId = this.invoicesByTxHash.get(txHash);
+    if (existingId && existingId !== id) {
+      const err = new Error('Transaction hash has already been used for another invoice');
+      (err as any).code = 'TX_HASH_ALREADY_USED';
+      throw err;
+    }
+
+    if (invoice.status !== 'PENDING') return undefined;
     if (new Date(invoice.expiresAt).getTime() <= now.getTime()) return undefined;
+
+    this.invoicesByTxHash.set(txHash, id);
 
     return this.updateInvoice(id, {
       status: 'PAID',
@@ -124,6 +157,7 @@ class MemoryStorage {
   clear() {
     this.invoices.clear();
     this.invoicesByMemo.clear();
+    this.invoicesByTxHash.clear();
     console.log('🗑️ Memory storage cleared');
   }
 

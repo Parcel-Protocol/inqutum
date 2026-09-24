@@ -130,7 +130,21 @@ function createFakePostgres() {
       return { rows: expired.map(row => ({ id: row.id })), rowCount: expired.length };
     }
 
+    if (sql.startsWith('SELECT * FROM invoices WHERE payment_tx_hash = $1')) {
+      const match = rows.find(row => row.payment_tx_hash === params[0]);
+      return { rows: match ? [clone(match)] : [], rowCount: match ? 1 : 0 };
+    }
+
     if (sql.startsWith("UPDATE invoices SET status = 'PAID'")) {
+      const alreadyHasTx = rows.find(
+        candidate => candidate.id !== params[0] && candidate.payment_tx_hash === params[1]
+      );
+      if (alreadyHasTx) {
+        const err = new Error('duplicate key value violates unique constraint "idx_invoices_payment_tx_hash"');
+        (err as any).code = '23505';
+        (err as any).constraint = 'idx_invoices_payment_tx_hash';
+        throw err;
+      }
       const row = rows.find(
         candidate => candidate.id === params[0] &&
           candidate.status === 'PENDING' &&
@@ -503,7 +517,7 @@ function runSharedBackendSuite(name: string, createStorage: () => InvoiceStorage
       assert.equal(res.body.error, 'Amount mismatch');
     });
 
-    it('refuses to verify an invoice twice', async () => {
+    it('allows idempotent re-verification of the same invoice with the same tx hash', async () => {
       const invoice = await createInvoice();
       transaction = paymentTransaction({
         memo: invoice.memo,
@@ -512,11 +526,71 @@ function runSharedBackendSuite(name: string, createStorage: () => InvoiceStorage
       });
       const req = createReq({ params: { id: invoice.id }, body: { txHash: TX_HASH } });
 
-      await call(handlers().verifyPayment, req);
-      const res = await call(handlers().verifyPayment, req);
+      const first = await call(handlers().verifyPayment, req);
+      assert.equal(first.statusCode, 200);
+
+      const second = await call(handlers().verifyPayment, req);
+      assert.equal(second.statusCode, 200);
+      assert.equal(second.body.data.status, 'PAID');
+    });
+
+    it('refuses to verify an already paid invoice with a different tx hash', async () => {
+      const invoice = await createInvoice();
+      transaction = paymentTransaction({
+        memo: invoice.memo,
+        amount: '42.5000000',
+        to: SELLER_A,
+      });
+      const firstReq = createReq({ params: { id: invoice.id }, body: { txHash: TX_HASH } });
+      await call(handlers().verifyPayment, firstReq);
+
+      const secondReq = createReq({ params: { id: invoice.id }, body: { txHash: 'b'.repeat(64) } });
+      const res = await call(handlers().verifyPayment, secondReq);
 
       assert.equal(res.statusCode, 400);
       assert.equal(res.body.error, 'Invoice has already been paid');
+    });
+
+    it('refuses to reuse a tx hash already consumed by another invoice', async () => {
+      const invoice1 = await createInvoice();
+      const invoice2 = await createInvoice();
+      transaction = paymentTransaction({
+        memo: invoice1.memo,
+        amount: '42.5000000',
+        to: SELLER_A,
+      });
+      const firstReq = createReq({ params: { id: invoice1.id }, body: { txHash: TX_HASH } });
+      const res1 = await call(handlers().verifyPayment, firstReq);
+      assert.equal(res1.statusCode, 200);
+
+      transaction = paymentTransaction({
+        memo: invoice2.memo,
+        amount: '42.5000000',
+        to: SELLER_A,
+      });
+      const secondReq = createReq({ params: { id: invoice2.id }, body: { txHash: TX_HASH } });
+      const res2 = await call(handlers().verifyPayment, secondReq);
+
+      assert.equal(res2.statusCode, 400);
+      assert.equal(res2.body.code, 'TX_HASH_ALREADY_USED');
+      assert.equal(res2.body.error, 'Transaction hash has already been used for another invoice');
+    });
+
+    it('prevents race conditions when two concurrent requests race on the same tx hash for different invoices', async () => {
+      const invoice1 = await createInvoice();
+      const invoice2 = await createInvoice();
+      const [res1, res2] = await Promise.allSettled([
+        storage.markAsPaid(invoice1.id, 'd'.repeat(64), PAYER),
+        storage.markAsPaid(invoice2.id, 'd'.repeat(64), PAYER),
+      ]);
+      const fulfilled = [res1, res2].filter((r) => r.status === 'fulfilled');
+      const rejected = [res1, res2].filter((r) => r.status === 'rejected');
+
+      assert.equal(fulfilled.length, 1);
+      assert.equal(rejected.length, 1);
+      if (rejected[0].status === 'rejected') {
+        assert.equal((rejected[0].reason as any).code, 'TX_HASH_ALREADY_USED');
+      }
     });
 
     it('returns 404 when verifying an unknown invoice', async () => {

@@ -1,0 +1,735 @@
+[
+  {
+    "id": "happy-path-native-xlm",
+    "description": "Native XLM payment matching memo, destination, amount, and asset code",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f50001",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-1001",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-1001",
+        "memo_type": "text"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "25.0000000",
+          "asset_type": "native"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": true,
+      "code": null,
+      "error": null
+    }
+  },
+  {
+    "id": "happy-path-format-equivalence",
+    "description": "Equivalent amount formats (integer 25 vs 25.0000000) match to stroop precision",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f50002",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-1002",
+        "amount": 25,
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-1002",
+        "memo_type": "text"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "25.0000000",
+          "asset_type": "native"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": true,
+      "code": null,
+      "error": null
+    }
+  },
+  {
+    "id": "happy-path-credit-asset",
+    "description": "Credit asset (USDC) with matching code and issuer",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f50003",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-1003",
+        "amount": "100.5000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "USDC",
+        "assetIssuer": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-1003",
+        "memo_type": "text"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "100.5000000",
+          "asset_type": "credit_alphanum4",
+          "asset_code": "USDC",
+          "asset_issuer": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": true,
+      "code": null,
+      "error": null
+    }
+  },
+  {
+    "id": "happy-path-multiple-operations",
+    "description": "Ignores non-payment operations alongside the valid payment",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f50004",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-1004",
+        "amount": "15.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-1004",
+        "memo_type": "text"
+      },
+      "operations": [
+        {
+          "type": "change_trust",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H"
+        },
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "15.0000000",
+          "asset_type": "native"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": true,
+      "code": null,
+      "error": null
+    }
+  },
+  {
+    "id": "reject-missing-tx-hash",
+    "description": "Rejects missing transaction hash before anything else",
+    "input": {
+      "txHash": "",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-2001",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-2001"
+      },
+      "operations": []
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "MISSING_TX_HASH",
+      "error": "Transaction hash is required"
+    }
+  },
+  {
+    "id": "reject-invalid-tx-hash-length",
+    "description": "Rejects invalid transaction hash (wrong length) before checking Horizon details",
+    "input": {
+      "txHash": "not-a-valid-hash",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-2002",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-2002"
+      },
+      "operations": []
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "INVALID_TX_HASH",
+      "error": "Transaction hash must be 64 hexadecimal characters"
+    }
+  },
+  {
+    "id": "reject-network-mismatch",
+    "description": "Rejects payment when transaction network does not match invoice network",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "PUBLIC",
+      "expected": {
+        "memo": "INV-2003",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-2003"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "25.0000000",
+          "asset_type": "native"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "NETWORK_MISMATCH",
+      "error": "Transaction is on a different Stellar network"
+    }
+  },
+  {
+    "id": "reject-no-payment-operation",
+    "description": "Rejects transaction that contains no payment operation",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-2004",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-2004"
+      },
+      "operations": [
+        {
+          "type": "change_trust",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "NO_PAYMENT_OPERATION",
+      "error": "No payment operation found in transaction"
+    }
+  },
+  {
+    "id": "reject-memo-mismatch",
+    "description": "Rejects payment with wrong memo",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-2005",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "WRONG-MEMO"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "25.0000000",
+          "asset_type": "native"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "MEMO_MISMATCH",
+      "error": "Memo mismatch"
+    }
+  },
+  {
+    "id": "reject-destination-mismatch",
+    "description": "Rejects payment sent to an account other than invoice seller",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-2006",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-2006"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GCLWGQPMKXQSPF776IU33AH4PZNOOWNAWGGKVTBQMIC5IMKUNP3E6NVU",
+          "amount": "25.0000000",
+          "asset_type": "native"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "DESTINATION_MISMATCH",
+      "error": "Payment destination mismatch"
+    }
+  },
+  {
+    "id": "reject-amount-mismatch-partial",
+    "description": "Rejects partial payment under expected invoice amount",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-2007",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-2007"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "24.9999999",
+          "asset_type": "native"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "AMOUNT_MISMATCH",
+      "error": "Amount mismatch"
+    }
+  },
+  {
+    "id": "reject-amount-mismatch-overpayment",
+    "description": "Rejects overpayment over expected invoice amount",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-2008",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-2008"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "25.0000001",
+          "asset_type": "native"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "AMOUNT_MISMATCH",
+      "error": "Amount mismatch"
+    }
+  },
+  {
+    "id": "reject-asset-mismatch-wrong-credit-code",
+    "description": "Rejects payment with wrong credit asset code",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-2009",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "USDC",
+        "assetIssuer": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-2009"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "25.0000000",
+          "asset_type": "credit_alphanum4",
+          "asset_code": "EURC",
+          "asset_issuer": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "ASSET_MISMATCH",
+      "error": "Asset mismatch"
+    }
+  },
+  {
+    "id": "reject-asset-mismatch-wrong-issuer",
+    "description": "Rejects credit asset payment from an issuer other than invoice asset issuer",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-2010",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "USDC",
+        "assetIssuer": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-2010"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "25.0000000",
+          "asset_type": "credit_alphanum4",
+          "asset_code": "USDC",
+          "asset_issuer": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "ASSET_MISMATCH",
+      "error": "Asset mismatch"
+    }
+  },
+  {
+    "id": "reject-asset-mismatch-fake-xlm-credit",
+    "description": "Refuses credit asset coded XLM against native XLM invoice",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-2011",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-2011"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "25.0000000",
+          "asset_type": "credit_alphanum4",
+          "asset_code": "XLM",
+          "asset_issuer": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "ASSET_MISMATCH",
+      "error": "Asset mismatch"
+    }
+  },
+  {
+    "id": "reject-asset-mismatch-native-for-credit",
+    "description": "Refuses native XLM payment against credit asset invoice",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-2012",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "USDC",
+        "assetIssuer": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-2012"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "25.0000000",
+          "asset_type": "native"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "ASSET_MISMATCH",
+      "error": "Asset mismatch"
+    }
+  },
+  {
+    "id": "reject-asset-mismatch-unpinned-credit-invoice",
+    "description": "Refuses credit invoice that records no issuer (unpinned)",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-2013",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "USDC",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-2013"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "25.0000000",
+          "asset_type": "credit_alphanum4",
+          "asset_code": "USDC",
+          "asset_issuer": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "ASSET_MISMATCH",
+      "error": "Asset mismatch"
+    }
+  },
+  {
+    "id": "order-invalid-hash-before-memo",
+    "description": "Check ordering: reports invalid tx hash before evaluating memo mismatch",
+    "input": {
+      "txHash": "bad-hash",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-3001",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "WRONG-MEMO"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "25.0000000",
+          "asset_type": "native"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "INVALID_TX_HASH",
+      "error": "Transaction hash must be 64 hexadecimal characters"
+    }
+  },
+  {
+    "id": "order-network-before-memo",
+    "description": "Check ordering: reports network mismatch before evaluating memo mismatch",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "PUBLIC",
+      "expected": {
+        "memo": "INV-3002",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "WRONG-MEMO"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "25.0000000",
+          "asset_type": "native"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "NETWORK_MISMATCH",
+      "error": "Transaction is on a different Stellar network"
+    }
+  },
+  {
+    "id": "order-no-payment-op-before-memo",
+    "description": "Check ordering: reports no payment op before evaluating memo mismatch",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-3003",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "WRONG-MEMO"
+      },
+      "operations": []
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "NO_PAYMENT_OPERATION",
+      "error": "No payment operation found in transaction"
+    }
+  },
+  {
+    "id": "order-memo-before-destination",
+    "description": "Check ordering: reports memo mismatch before evaluating destination mismatch",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-3004",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "WRONG-MEMO"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GCLWGQPMKXQSPF776IU33AH4PZNOOWNAWGGKVTBQMIC5IMKUNP3E6NVU",
+          "amount": "25.0000000",
+          "asset_type": "native"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "MEMO_MISMATCH",
+      "error": "Memo mismatch"
+    }
+  },
+  {
+    "id": "order-destination-before-amount",
+    "description": "Check ordering: reports destination mismatch before evaluating amount mismatch",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-3005",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-3005"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GCLWGQPMKXQSPF776IU33AH4PZNOOWNAWGGKVTBQMIC5IMKUNP3E6NVU",
+          "amount": "99.0000000",
+          "asset_type": "native"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "DESTINATION_MISMATCH",
+      "error": "Payment destination mismatch"
+    }
+  },
+  {
+    "id": "order-amount-before-asset",
+    "description": "Check ordering: reports amount mismatch before evaluating asset mismatch",
+    "input": {
+      "txHash": "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1",
+      "network": "TESTNET",
+      "expected": {
+        "memo": "INV-3006",
+        "amount": "25.0000000",
+        "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        "assetCode": "XLM",
+        "network": "TESTNET"
+      },
+      "transaction": {
+        "memo": "INV-3006"
+      },
+      "operations": [
+        {
+          "type": "payment",
+          "from": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+          "to": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+          "amount": "99.0000000",
+          "asset_type": "credit_alphanum4",
+          "asset_code": "USDC",
+          "asset_issuer": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+        }
+      ]
+    },
+    "expectedOutcome": {
+      "ok": false,
+      "code": "AMOUNT_MISMATCH",
+      "error": "Amount mismatch"
+    }
+  }
+]

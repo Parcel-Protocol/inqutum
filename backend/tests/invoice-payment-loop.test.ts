@@ -79,9 +79,14 @@ function paymentOn(overrides: {
   to?: string;
   assetType?: string;
   assetCode?: string;
+  txHash?: string;
 }) {
   return (path: string) => {
-    if (path.startsWith(`/transactions/${TX_HASH}/operations`)) {
+    const opMatch = path.match(/^\/transactions\/([a-fA-F0-9]{64})\/operations/);
+    if (opMatch) {
+      if (overrides.txHash && opMatch[1] !== overrides.txHash) {
+        return { status: 404, body: { title: 'Resource Missing' } };
+      }
       return {
         status: 200,
         body: {
@@ -102,11 +107,15 @@ function paymentOn(overrides: {
       };
     }
 
-    if (path.startsWith(`/transactions/${TX_HASH}`)) {
+    const txMatch = path.match(/^\/transactions\/([a-fA-F0-9]{64})/);
+    if (txMatch) {
+      if (overrides.txHash && txMatch[1] !== overrides.txHash) {
+        return { status: 404, body: { title: 'Resource Missing' } };
+      }
       return {
         status: 200,
         body: {
-          hash: TX_HASH,
+          hash: txMatch[1],
           successful: true,
           ledger: 1_000_000,
           memo: overrides.memo,
@@ -196,10 +205,11 @@ describe('invoice payment loop', () => {
 
   it('stores payer details supplied with the verification', async () => {
     const invoice = await createInvoice(port);
-    horizonResponder = paymentOn({ memo: invoice.memo });
+    const payerTxHash = '1'.repeat(64);
+    horizonResponder = paymentOn({ memo: invoice.memo, txHash: payerTxHash });
 
     const verified = await jsonRequest(port, 'POST', `/api/invoices/${invoice.id}/verify`, {
-      txHash: TX_HASH,
+      txHash: payerTxHash,
       payerName: 'Ada Lovelace',
       payerEmail: 'ada@example.com',
     });
@@ -264,21 +274,63 @@ describe('invoice payment loop', () => {
     assert.match(verified.body.error, /asset/i);
   });
 
-  it('refuses a second verification of an already paid invoice', async () => {
+  it('allows idempotent re-verification of the same invoice with the same tx hash', async () => {
     const invoice = await createInvoice(port);
-    horizonResponder = paymentOn({ memo: invoice.memo });
+    const hash = '2'.repeat(64);
+    horizonResponder = paymentOn({ memo: invoice.memo, txHash: hash });
 
     const first = await jsonRequest(port, 'POST', `/api/invoices/${invoice.id}/verify`, {
-      txHash: TX_HASH,
+      txHash: hash,
     });
     assert.equal(first.status, 200);
 
     const second = await jsonRequest(port, 'POST', `/api/invoices/${invoice.id}/verify`, {
-      txHash: TX_HASH,
+      txHash: hash,
+    });
+
+    assert.equal(second.status, 200);
+    assert.equal(second.body.data.status, 'PAID');
+    assert.equal(second.body.data.paymentTxHash, hash);
+  });
+
+  it('refuses verification of an already paid invoice when given a different tx hash', async () => {
+    const invoice = await createInvoice(port);
+    const hash1 = '3'.repeat(64);
+    const hash2 = '4'.repeat(64);
+    horizonResponder = paymentOn({ memo: invoice.memo });
+
+    const first = await jsonRequest(port, 'POST', `/api/invoices/${invoice.id}/verify`, {
+      txHash: hash1,
+    });
+    assert.equal(first.status, 200);
+
+    const second = await jsonRequest(port, 'POST', `/api/invoices/${invoice.id}/verify`, {
+      txHash: hash2,
     });
 
     assert.equal(second.status, 400);
     assert.match(second.body.error, /already been paid/i);
+  });
+
+  it('refuses to reuse a tx hash already consumed by another invoice', async () => {
+    const invoice1 = await createInvoice(port);
+    const invoice2 = await createInvoice(port);
+    const reusedHash = '5'.repeat(64);
+    horizonResponder = paymentOn({ memo: invoice1.memo, txHash: reusedHash });
+
+    const first = await jsonRequest(port, 'POST', `/api/invoices/${invoice1.id}/verify`, {
+      txHash: reusedHash,
+    });
+    assert.equal(first.status, 200);
+
+    horizonResponder = paymentOn({ memo: invoice2.memo, txHash: reusedHash });
+    const second = await jsonRequest(port, 'POST', `/api/invoices/${invoice2.id}/verify`, {
+      txHash: reusedHash,
+    });
+
+    assert.equal(second.status, 400);
+    assert.equal(second.body.code, 'TX_HASH_ALREADY_USED');
+    assert.equal(second.body.error, 'Transaction hash has already been used for another invoice');
   });
 
   it('requires a transaction hash', async () => {
