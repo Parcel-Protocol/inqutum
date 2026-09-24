@@ -17,10 +17,6 @@ export class MemoryInvoiceStorage implements InvoiceStorage {
     return invoice ?? null;
   }
 
-  async getInvoiceByTxHash(txHash: string): Promise<StoredInvoice | null> {
-    return this.service.getInvoiceByTxHash(txHash);
-  }
-
   async getInvoicesBySeller(
     sellerPublicKey: string,
     status?: string,
