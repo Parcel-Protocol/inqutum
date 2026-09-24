@@ -52,6 +52,7 @@ export interface InvoiceStorage {
 
   createInvoice(input: CreateInvoiceInput): Promise<StoredInvoice>;
   getInvoiceById(id: string): Promise<StoredInvoice | null>;
+  getInvoiceByTxHash(txHash: string): Promise<StoredInvoice | null>;
   getInvoicesBySeller(
     sellerPublicKey: string,
     status?: string,

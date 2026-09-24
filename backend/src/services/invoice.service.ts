@@ -122,6 +122,17 @@ export class InvoiceService {
     return this.mapRowToInvoice(result.rows[0]);
   }
 
+  async getInvoiceByTxHash(txHash: string): Promise<Invoice | null> {
+    const query = 'SELECT * FROM invoices WHERE payment_tx_hash = $1';
+    const result = await this.db.query(query, [txHash]);
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return this.mapRowToInvoice(result.rows[0]);
+  }
+
   /**
    * Update invoice status to PAID
    */
@@ -131,6 +142,20 @@ export class InvoiceService {
     payerPublicKey: string,
     payerInfo?: { payerName?: string; payerEmail?: string }
   ): Promise<Invoice> {
+    // Check if invoice is already paid with the exact same txHash (idempotent)
+    const currentInvoice = await this.getInvoiceById(invoiceId);
+    if (currentInvoice && currentInvoice.status === 'PAID' && currentInvoice.paymentTxHash === txHash) {
+      return currentInvoice;
+    }
+
+    // Check if another invoice already used this txHash
+    const existingWithTx = await this.getInvoiceByTxHash(txHash);
+    if (existingWithTx && existingWithTx.id !== invoiceId) {
+      const err = new Error('Transaction hash has already been used for another invoice');
+      (err as any).code = 'TX_HASH_ALREADY_USED';
+      throw err;
+    }
+
     const query = `
       UPDATE invoices 
       SET status = 'PAID', payment_tx_hash = $2, payer_public_key = $3, paid_at = NOW(),
@@ -161,6 +186,17 @@ export class InvoiceService {
 
       return this.mapRowToInvoice(result.rows[0]);
     } catch (error: any) {
+      if (error?.code === 'TX_HASH_ALREADY_USED') {
+        throw error;
+      }
+      if (
+        error?.code === '23505' &&
+        (error?.detail?.includes('payment_tx_hash') || error?.constraint === 'idx_invoices_payment_tx_hash')
+      ) {
+        const err = new Error('Transaction hash has already been used for another invoice');
+        (err as any).code = 'TX_HASH_ALREADY_USED';
+        throw err;
+      }
       console.error('Error marking invoice as paid:', error);
       throw new Error(`Failed to update invoice: ${error.message}`);
     }
