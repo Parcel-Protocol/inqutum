@@ -26,10 +26,6 @@ export class PostgresInvoiceStorage implements InvoiceStorage {
     return this.service.getInvoiceById(id);
   }
 
-  async getInvoiceByTxHash(txHash: string): Promise<StoredInvoice | null> {
-    return this.service.getInvoiceByTxHash(txHash);
-  }
-
   async getInvoicesBySeller(
     sellerPublicKey: string,
     status?: string,

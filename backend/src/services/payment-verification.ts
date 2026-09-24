@@ -33,8 +33,7 @@ export type VerificationCode =
   | 'DESTINATION_MISMATCH'
   | 'AMOUNT_MISMATCH'
   | 'ASSET_MISMATCH'
-  | 'NETWORK_MISMATCH'
-  | 'TX_HASH_ALREADY_USED';
+  | 'NETWORK_MISMATCH';
 
 /** User-facing message for every rejection code. Mirrored in `frontend/lib/verification.js`. */
 export const VERIFICATION_MESSAGES: Record<VerificationCode, string> = {
@@ -53,7 +52,6 @@ export const VERIFICATION_MESSAGES: Record<VerificationCode, string> = {
   AMOUNT_MISMATCH: 'Amount mismatch',
   ASSET_MISMATCH: 'Asset mismatch',
   NETWORK_MISMATCH: 'Transaction is on a different Stellar network',
-  TX_HASH_ALREADY_USED: 'Transaction hash has already been used for another invoice',
 };
 
 export interface VerificationFailure {

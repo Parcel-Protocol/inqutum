@@ -218,11 +218,6 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           return sendFailure(res, 404, 'Invoice not found');
         }
 
-        // Idempotent re-verification: if the invoice is already paid with the exact same txHash, return 200
-        if (invoice.status === 'PAID' && invoice.paymentTxHash === hashCheck.value) {
-          return sendSuccess(res, 200, invoice, { message: 'Payment verified on Stellar' });
-        }
-
         const statusCheck = checkInvoiceIsPayable(invoice.status);
         if (!statusCheck.ok) {
           return sendVerificationFailure(res, 400, statusCheck.code, statusCheck.error);
@@ -260,17 +255,6 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           return sendVerificationFailure(res, 400, verification.code, verification.error);
         }
 
-        // Global replay prevention: check if txHash has already been consumed for a different invoice
-        const existingInvoiceWithTx = await storage.getInvoiceByTxHash(hashCheck.value);
-        if (existingInvoiceWithTx && existingInvoiceWithTx.id !== id) {
-          return sendVerificationFailure(
-            res,
-            400,
-            'TX_HASH_ALREADY_USED',
-            VERIFICATION_MESSAGES.TX_HASH_ALREADY_USED
-          );
-        }
-
         let updatedInvoice: StoredInvoice;
         try {
           updatedInvoice = await storage.markAsPaid(
@@ -279,15 +263,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
             verification.value.from,
             payerCheck.value
           );
-        } catch (error: any) {
-          if (error?.code === 'TX_HASH_ALREADY_USED') {
-            return sendVerificationFailure(
-              res,
-              400,
-              'TX_HASH_ALREADY_USED',
-              VERIFICATION_MESSAGES.TX_HASH_ALREADY_USED
-            );
-          }
+        } catch (error) {
           // The payment lookup can cross expiresAt after the first status read.
           // Re-read so that race still returns the public expiry contract.
           const latest = await storage.getInvoiceById(id);

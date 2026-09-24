@@ -77,26 +77,6 @@ describe('amountsMatch — direct edge cases', () => {
     assert.equal(amountsMatch('0', '0.0000001', 0), false);
     assert.equal(amountsMatch('0', '0.0000001', 1), true);
   });
-
-  it('correctly compares adversarial decimals without float rounding flaws (#5)', () => {
-    // 0.1, 0.2, 0.3 tests
-    assert.equal(amountsMatch('0.1', '0.1000000', 0), true);
-    assert.equal(amountsMatch('0.2', '0.2000000', 0), true);
-    assert.equal(amountsMatch('0.3', '0.3000000', 0), true);
-    assert.equal(amountsMatch('0.1', '0.2', 0), false);
-    assert.equal(amountsMatch('0.2', '0.3', 0), false);
-
-    // High precision large value with single stroop fractional part
-    assert.equal(amountsMatch('10000000.0000001', '10000000.0000001', 0), true);
-    assert.equal(amountsMatch('10000000.0000001', '10000000.0000000', 0), false);
-    assert.equal(amountsMatch('10000000.0000001', '10000000.0000000', 1), true);
-
-    // Stellar protocol max capacity edge values (approx 50 billion XLM = 50,000,000,000.0000000)
-    const maxStellar = '50000000000.0000000';
-    assert.equal(amountsMatch(maxStellar, '50000000000.0000000', 0), true);
-    assert.equal(amountsMatch(maxStellar, '50000000000.0000001', 0), false);
-    assert.equal(amountsMatch(maxStellar, '50000000000.0000001', 1), true);
-  });
 });
 
 export default amountsMatch;

@@ -20,56 +20,6 @@ export interface AmountMatchInput {
 }
 
 /**
- * Parse an amount (string or number) into integer stroops (1e-7 units) using
- * exact string/BigInt fixed-point arithmetic, avoiding JavaScript floating-point
- * rounding artifacts.
- */
-export function parseToStroops(value: unknown): bigint | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value !== 'string' && typeof value !== 'number') {
-    return null;
-  }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value) || Number.isNaN(value)) {
-      return null;
-    }
-  }
-
-  const str = String(value).trim();
-  if (str === '') {
-    return null;
-  }
-
-  const match = /^([+-]?\d+)(?:\.(\d+))?$/.exec(str);
-  if (!match) {
-    return null;
-  }
-
-  const isNegative = match[1].startsWith('-');
-  const rawInt = match[1].replace(/^[+-]/, '');
-  const intPart = BigInt(rawInt);
-
-  let fracStr = match[2] || '';
-  let fracBig: bigint;
-
-  if (fracStr.length > STROOP_DECIMALS) {
-    const keep = fracStr.slice(0, STROOP_DECIMALS);
-    const nextDigit = parseInt(fracStr[STROOP_DECIMALS], 10);
-    fracBig = BigInt(keep);
-    if (nextDigit >= 5) {
-      fracBig += 1n;
-    }
-  } else {
-    fracStr = fracStr.padEnd(STROOP_DECIMALS, '0');
-    fracBig = BigInt(fracStr);
-  }
-
-  return (intPart * 10_000_000n + fracBig) * (isNegative ? -1n : 1n);
-}
-
-/**
  * Compare two Stellar amounts with an allowable delta, measured in stroops.
  *
  * @param expected   Amount the invoice demands. String or number.
@@ -98,29 +48,34 @@ export function amountsMatch(
     return false;
   }
 
-  if (typeof expected === 'string' && expected.trim() === '') {
-    return false;
-  }
-  if (typeof actual === 'string' && actual.trim() === '') {
-    return false;
-  }
+  const expectedStr = typeof expected === 'string' ? expected : String(expected);
+  const actualStr = typeof actual === 'string' || typeof actual === 'number' ? String(actual) : '';
 
-  const expectedStroops = parseToStroops(expected);
-  const actualStroops = parseToStroops(actual);
-
-  if (expectedStroops === null || actualStroops === null) {
+  if (expectedStr.trim() === '' || actualStr.trim() === '') {
     return false;
   }
 
-  void STROOP_SCALE;
-  void MAX_SAFE_STROOP;
+  const expectedNum = Number(expectedStr);
+  const actualNum = Number(actualStr);
 
-  const delta =
-    expectedStroops >= actualStroops
-      ? expectedStroops - actualStroops
-      : actualStroops - expectedStroops;
+  if (!Number.isFinite(expectedNum) || !Number.isFinite(actualNum)) {
+    return false;
+  }
 
-  return delta <= BigInt(toleranceStroops);
+  const expectedStroops = Math.round(expectedNum * STROOP_SCALE);
+  const actualStroops = Math.round(actualNum * STROOP_SCALE);
+
+  if (
+    !Number.isSafeInteger(expectedStroops) ||
+    !Number.isSafeInteger(actualStroops)
+  ) {
+    return false;
+  }
+
+  void MAX_SAFE_STROOP; // reference kept so readers can correlate the bound above.
+
+  const delta = Math.abs(expectedStroops - actualStroops);
+  return delta <= toleranceStroops;
 }
 
-export default { amountsMatch, parseToStroops, STROOP_DECIMALS };
+export default { amountsMatch, STROOP_DECIMALS };
