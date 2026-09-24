@@ -23,6 +23,22 @@ Checks run in a fixed order so every caller reports the same *first* failure:
 6. **Amount** — compared at Stellar's 7-decimal precision (`AMOUNT_MISMATCH`)
 7. **Asset** — code *and* issuer (`ASSET_MISMATCH`)
 
+## Multi-operation and envelope policy
+
+Any operation whose `type` is exactly `payment` may settle the invoice. The
+verifier scans all operations and requires one operation to match destination,
+amount, and asset; unrelated operations are ignored. Path payments are not
+accepted and therefore produce `NO_PAYMENT_OPERATION`.
+
+Muxed destinations are compared exactly. An invoice that stores a muxed
+destination must receive that same sub-account; its base `G` account or a
+different muxed id does not match. An invoice with a base destination does not
+silently accept a muxed destination.
+
+Fee-bump envelopes are unwrapped for memo and operation verification. The
+submitted outer transaction hash is the canonical verified hash persisted on
+the invoice and used for replay prevention.
+
 ## Asset matching
 
 This is the check that most often looks simpler than it is. A Stellar asset is
