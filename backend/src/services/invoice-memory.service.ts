@@ -90,6 +90,11 @@ export class InvoiceMemoryService {
     return updated;
   }
 
+  async findOverduePendingInvoices(cutoff: Date, limit: number) {
+    const overdue = this.storage.findOverduePending(cutoff);
+    return { total: overdue.length, invoices: overdue.slice(0, limit) };
+  }
+
   async markExpiredInvoices(now?: Date): Promise<number> {
     return this.storage.markExpiredInvoices(now);
   }

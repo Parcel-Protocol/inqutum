@@ -1,7 +1,7 @@
 import invoiceService, { InvoiceService } from '../services/invoice.service';
 import { CreateInvoiceInput } from '../utils/validation';
 import type { InvoiceStats } from './invoice-stats';
-import type { InvoiceStorage, PayerInfo, StoredInvoice } from './invoice-storage';
+import type { InvoiceStorage, OverduePendingInvoices, PayerInfo, StoredInvoice } from './invoice-storage';
 import { auditStore, AuditEvent, AuditFilter, AuditQueryResult } from '../audit/audit-service';
 
 /**
@@ -55,6 +55,10 @@ export class PostgresInvoiceStorage implements InvoiceStorage {
 
   async markExpiredInvoices(now?: Date): Promise<number> {
     return this.service.markExpiredInvoices(now);
+  }
+
+  async findOverduePendingInvoices(cutoff: Date, limit: number): Promise<OverduePendingInvoices> {
+    return this.service.findOverduePendingInvoices(cutoff, limit);
   }
 
   async recordAuditEvent(event: Omit<AuditEvent, 'id' | 'timestamp'> & { timestamp?: string }): Promise<AuditEvent> {
