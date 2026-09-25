@@ -7,11 +7,16 @@ import { validateStellarConfig, SELLER_PUBLIC_KEY } from './config/stellar';
 import paymentMonitorService from './services/payment-monitor.service';
 import { configuredFrontendOrigins, corsOptions } from './config/runtime';
 import postgresInvoiceStorage from './storage/postgres-invoice-storage';
+import { correlationMiddleware } from './observability/telemetry';
+import { buildUserSafeErrorResponse, classifyError } from './errors/error-taxonomy';
 
 dotenv.config();
 
 const app: Application = express();
 const PORT = process.env.PORT || 3001;
+
+// Correlation ID & Latency Tracking
+app.use(correlationMiddleware());
 
 app.use(cors(corsOptions()));
 
@@ -19,7 +24,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use((req: Request, res: Response, next: NextFunction) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  console.log(`${new Date().toISOString()} [${req.correlationId}] - ${req.method} ${req.path}`);
   next();
 });
 
@@ -35,20 +40,22 @@ app.get('/', (req: Request, res: Response) => {
   });
 });
 
+// User-Safe Error handling middleware with taxonomy and correlation tracking
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error('Unhandled error:', err);
-  const code = (err as Error & { code?: string }).code;
-  res.status(code === 'CORS_ORIGIN_DENIED' ? 403 : 500).json({
-    success: false,
-    code,
-    error: err.message || 'Internal server error',
-  });
+  const classified = classifyError(err);
+  const status = (err as any).code === 'CORS_ORIGIN_DENIED' ? 403 : classified.httpStatus || 500;
+  const payload = buildUserSafeErrorResponse(err, req.correlationId);
+
+  res.status(status).json(payload);
 });
 
 app.use((req: Request, res: Response) => {
   res.status(404).json({
     success: false,
+    code: 'NOT_FOUND',
     error: 'Endpoint not found',
+    correlationId: req.correlationId,
   });
 });
 

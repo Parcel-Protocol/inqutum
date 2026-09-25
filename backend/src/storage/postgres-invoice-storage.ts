@@ -2,6 +2,7 @@ import invoiceService, { InvoiceService } from '../services/invoice.service';
 import { CreateInvoiceInput } from '../utils/validation';
 import type { InvoiceStats } from './invoice-stats';
 import type { InvoiceStorage, PayerInfo, StoredInvoice } from './invoice-storage';
+import { auditStore, AuditEvent, AuditFilter, AuditQueryResult } from '../audit/audit-service';
 
 /**
  * PostgreSQL storage backend. Same contract as the in-memory backend, but the
@@ -54,6 +55,18 @@ export class PostgresInvoiceStorage implements InvoiceStorage {
 
   async markExpiredInvoices(now?: Date): Promise<number> {
     return this.service.markExpiredInvoices(now);
+  }
+
+  async recordAuditEvent(event: Omit<AuditEvent, 'id' | 'timestamp'> & { timestamp?: string }): Promise<AuditEvent> {
+    return auditStore.recordEvent(event);
+  }
+
+  async getAuditEvents(filter?: AuditFilter): Promise<AuditQueryResult> {
+    return auditStore.queryEvents(filter);
+  }
+
+  async getAuditEventsByInvoice(invoiceId: string): Promise<AuditEvent[]> {
+    return auditStore.getEventsByEntity(invoiceId);
   }
 }
 

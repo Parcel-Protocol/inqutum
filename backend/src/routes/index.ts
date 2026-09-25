@@ -3,6 +3,8 @@ import stellarController from '../controllers/stellar.controller';
 import paymentMonitorService from '../services/payment-monitor.service';
 import postgresInvoiceStorage from '../storage/postgres-invoice-storage';
 import { createInvoiceRouter } from './invoice.routes';
+import { createAuditRouter } from './audit.routes';
+import { createObservabilityRouter } from './observability.routes';
 import { healthHandler, readinessHandler } from '../health';
 
 const router = Router();
@@ -13,6 +15,8 @@ router.get('/ready', readinessHandler(postgresInvoiceStorage.mode));
 
 // Invoice routes — same handlers the MVP server uses, backed by PostgreSQL
 router.use(createInvoiceRouter({ storage: postgresInvoiceStorage }));
+router.use(createAuditRouter({ storage: postgresInvoiceStorage }));
+router.use(createObservabilityRouter({ storage: postgresInvoiceStorage }));
 
 // Stellar routes
 router.get('/stellar/account', stellarController.getAccountInfo.bind(stellarController));

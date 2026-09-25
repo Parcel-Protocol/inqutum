@@ -7,15 +7,22 @@ import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { createInvoiceRouter } from './routes/invoice.routes';
+import { createAuditRouter } from './routes/audit.routes';
+import { createObservabilityRouter } from './routes/observability.routes';
 import memoryInvoiceStorage from './storage/memory-invoice-storage';
 import { configuredFrontendOrigins, corsOptions } from './config/runtime';
 import { healthHandler, readinessHandler } from './health';
+import { correlationMiddleware } from './observability/telemetry';
+import { buildUserSafeErrorResponse, classifyError } from './errors/error-taxonomy';
 
 // Load environment variables
 dotenv.config();
 
 const app: Application = express();
 const PORT = process.env.PORT || 3001;
+
+// Correlation ID & Latency Tracking
+app.use(correlationMiddleware());
 
 // Middleware
 app.use(cors(corsOptions()));
@@ -25,7 +32,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Request logging
 app.use((req: Request, res: Response, next: NextFunction) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  console.log(`${new Date().toISOString()} [${req.correlationId}] - ${req.method} ${req.path}`);
   next();
 });
 
@@ -44,8 +51,10 @@ app.get('/', (req: Request, res: Response) => {
 app.get('/api/health', healthHandler(memoryInvoiceStorage.mode));
 app.get('/api/ready', readinessHandler(memoryInvoiceStorage.mode));
 
-// Invoice routes — same handlers the Postgres server uses, backed by in-memory storage
+// Invoice, Audit & Observability routes
 app.use('/api', createInvoiceRouter({ storage: memoryInvoiceStorage }));
+app.use('/api', createAuditRouter({ storage: memoryInvoiceStorage }));
+app.use('/api', createObservabilityRouter({ storage: memoryInvoiceStorage }));
 
 // Mock Stellar endpoint (MVP only)
 app.get('/api/stellar/account', (req: Request, res: Response) => {
@@ -60,25 +69,27 @@ app.get('/api/stellar/account', (req: Request, res: Response) => {
       sequence: '12345678',
       subentryCount: 0,
     },
+    correlationId: req.correlationId,
   });
 });
 
-// Error handling middleware
+// User-Safe Error handling middleware with taxonomy and correlation tracking
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error('Unhandled error:', err);
-  const code = (err as Error & { code?: string }).code;
-  res.status(code === 'CORS_ORIGIN_DENIED' ? 403 : 500).json({
-    success: false,
-    code,
-    error: err.message || 'Internal server error',
-  });
+  const classified = classifyError(err);
+  const status = (err as any).code === 'CORS_ORIGIN_DENIED' ? 403 : classified.httpStatus || 500;
+  const payload = buildUserSafeErrorResponse(err, req.correlationId);
+
+  res.status(status).json(payload);
 });
 
 // 404 handler
 app.use((req: Request, res: Response) => {
   res.status(404).json({
     success: false,
+    code: 'NOT_FOUND',
     error: 'Endpoint not found',
+    correlationId: req.correlationId,
   });
 });
 
