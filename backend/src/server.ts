@@ -7,6 +7,7 @@ import { validateStellarConfig, SELLER_PUBLIC_KEY } from './config/stellar';
 import paymentMonitorService from './services/payment-monitor.service';
 import { configuredFrontendOrigins, corsOptions } from './config/runtime';
 import postgresInvoiceStorage from './storage/postgres-invoice-storage';
+import { securityHeaders } from './security/content-safety';
 import { correlationMiddleware } from './observability/telemetry';
 import { buildUserSafeErrorResponse, classifyError } from './errors/error-taxonomy';
 
@@ -17,6 +18,9 @@ const PORT = process.env.PORT || 3001;
 
 // Correlation ID & Latency Tracking
 app.use(correlationMiddleware());
+
+// Restrictive security headers on every API response
+app.use(securityHeaders());
 
 app.use(cors(corsOptions()));
 

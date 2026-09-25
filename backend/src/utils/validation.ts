@@ -5,6 +5,7 @@ import {
   MIN_INVOICE_EXPIRY_DAYS,
 } from '../domain/invoice-expiry';
 import { NATIVE_ASSET_CODE, requiresIssuer } from './asset-helpers';
+import { sanitizePlainText } from '../security/content-safety';
 
 // Schemas used identically by both servers. Zod validates the create+verify
 // payloads before they ever reach the InvoiceStorage layer, so the memory
@@ -23,15 +24,25 @@ export const stellarPublicKeySchema = z.string()
  * accepting it at creation would only produce an invoice that can never be
  * paid. `XLM` is the exception: it is the native asset and has no issuer.
  */
+/**
+ * Free-text fields are length-checked as submitted, then stripped of markup,
+ * control and bidi characters. A value that is empty after stripping is dropped.
+ */
+const plainText = (max: number, multiline = false) =>
+  z
+    .string()
+    .max(max)
+    .transform((value) => sanitizePlainText(value, { multiline }) || undefined);
+
 export const createInvoiceSchema = z
   .object({
     amount: z.number().positive().max(1000000000),
     assetCode: z.string().default('XLM').optional(),
     assetIssuer: stellarPublicKeySchema.optional(),
-    description: z.string().max(500).optional(),
-    customerName: z.string().max(255).optional(),
+    description: plainText(500, true).optional(),
+    customerName: plainText(255).optional(),
     customerEmail: z.string().email().optional(),
-    sellerName: z.string().max(255).optional(),
+    sellerName: plainText(255).optional(),
     sellerEmail: z.string().email().optional(),
     expiresInDays: z.number()
       .int()

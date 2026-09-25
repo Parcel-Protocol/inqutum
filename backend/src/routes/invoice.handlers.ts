@@ -23,6 +23,7 @@ import { simulationAllowed } from '../config/runtime';
 import { metrics } from '../observability/telemetry';
 import { exportAuditEvents, AuditAction } from '../audit/audit-service';
 import { classifyError } from '../errors/error-taxonomy';
+import { safeFrontendOrigin } from '../security/content-safety';
 import { NotificationService, notificationService } from '../notifications/notification-service';
 import type { VerificationCode } from '../services/payment-verification';
 
@@ -103,7 +104,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
     safely('sync', () => notifications.syncInvoiceNotifications(invoice));
 
   const frontendUrl = () =>
-    options.frontendUrl || process.env.FRONTEND_URL || 'http://localhost:3000';
+    safeFrontendOrigin(options.frontendUrl || process.env.FRONTEND_URL);
 
   const simulateAllowed = () =>
     process.env.NODE_ENV !== 'production' && (

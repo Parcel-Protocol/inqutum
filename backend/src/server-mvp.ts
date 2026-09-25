@@ -14,6 +14,7 @@ import { createObservabilityRouter } from './routes/observability.routes';
 import memoryInvoiceStorage from './storage/memory-invoice-storage';
 import { configuredFrontendOrigins, corsOptions } from './config/runtime';
 import { healthHandler, readinessHandler } from './health';
+import { securityHeaders } from './security/content-safety';
 import { correlationMiddleware } from './observability/telemetry';
 import { buildUserSafeErrorResponse, classifyError } from './errors/error-taxonomy';
 
@@ -25,6 +26,9 @@ const PORT = process.env.PORT || 3001;
 
 // Correlation ID & Latency Tracking
 app.use(correlationMiddleware());
+
+// Restrictive security headers on every API response
+app.use(securityHeaders());
 
 // Middleware
 app.use(cors(corsOptions()));

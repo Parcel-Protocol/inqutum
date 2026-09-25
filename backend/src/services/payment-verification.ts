@@ -17,6 +17,7 @@ import {
   resolveInvoiceAsset,
   resolvePaymentAsset,
 } from '../utils/asset-helpers';
+import { sanitizePlainText } from '../security/content-safety';
 import { amountsMatch as stroopAmountsMatch } from '../utils/verify-amount-tolerance';
 
 export type VerificationCode =
@@ -71,7 +72,8 @@ export type VerificationResult<T> = VerificationSuccess<T> | VerificationFailure
 /** Amount precision used by Stellar (7 decimal places). */
 export const STROOP_PRECISION = 7;
 const MAX_PAYER_FIELD_LENGTH = 255;
-const PAYER_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Conservative allow-list: no markup, quotes, `?`/`&`/`%` (mailto/query injection) or whitespace.
+const PAYER_EMAIL_PATTERN = /^[A-Za-z0-9._+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}$/;
 const TX_HASH_PATTERN = /^[0-9a-f]{64}$/i;
 
 export function failure(code: VerificationCode): VerificationFailure {
@@ -113,7 +115,7 @@ export function checkPayerInfo(input: PayerInfo | Record<string, any>): Verifica
     return failure('INVALID_PAYER_EMAIL');
   }
 
-  const normalizedPayerName = payerName?.trim() || undefined;
+  const normalizedPayerName = (payerName !== undefined && sanitizePlainText(payerName)) || undefined;
   const normalizedPayerEmail = payerEmail?.trim() || undefined;
 
   if (normalizedPayerEmail && !PAYER_EMAIL_PATTERN.test(normalizedPayerEmail)) {
