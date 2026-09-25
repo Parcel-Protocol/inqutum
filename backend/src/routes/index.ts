@@ -7,6 +7,9 @@ import { createAuditRouter } from './audit.routes';
 import { createExportRouter } from './export.routes';
 import { createNotificationRouter } from './notification.routes';
 import { createObservabilityRouter } from './observability.routes';
+import { createJobsRouter } from './jobs.routes';
+import { PostgresJobStore } from '../jobs/postgres-job-store';
+import { pool } from '../config/database';
 import { healthHandler, readinessHandler } from '../health';
 
 const router = Router();
@@ -21,6 +24,8 @@ router.use(createAuditRouter({ storage: postgresInvoiceStorage }));
 router.use(createObservabilityRouter({ storage: postgresInvoiceStorage }));
 router.use(createNotificationRouter());
 router.use(createExportRouter({ storage: postgresInvoiceStorage }));
+
+router.use(createJobsRouter({ store: new PostgresJobStore(pool) }));
 
 // Stellar routes
 router.get('/stellar/account', stellarController.getAccountInfo.bind(stellarController));

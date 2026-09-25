@@ -9,12 +9,24 @@ import { configuredFrontendOrigins, corsOptions } from './config/runtime';
 import postgresInvoiceStorage from './storage/postgres-invoice-storage';
 import { securityHeaders } from './security/content-safety';
 import { correlationMiddleware } from './observability/telemetry';
+import invoiceService from './services/invoice.service';
+import { JobQueue, JobWorker } from './jobs/worker';
+import { PostgresJobStore } from './jobs/postgres-job-store';
+import { registerJobHandlers, startExpiryScheduler } from './jobs/runtime';
 import { buildUserSafeErrorResponse, classifyError } from './errors/error-taxonomy';
 
 dotenv.config();
 
 const app: Application = express();
 const PORT = process.env.PORT || 3001;
+
+// Background jobs: the expiry sweep runs through the worker framework. Set
+// JOBS_EMBEDDED_WORKER=false to run workers only via `npm run worker`.
+const jobStore = new PostgresJobStore(pool);
+const jobWorker = registerJobHandlers(new JobWorker({ store: jobStore }), {
+  expirePendingInvoices: () => invoiceService.markExpiredInvoices(),
+});
+let stopExpiryScheduler: (() => void) | null = null;
 
 // Correlation ID & Latency Tracking
 app.use(correlationMiddleware());
@@ -75,6 +87,11 @@ async function initialize() {
     } else {
       console.log('Wallet-scoped mode: no SELLER_PUBLIC_KEY, payment monitor disabled');
     }
+
+    if (process.env.JOBS_EMBEDDED_WORKER !== 'false') {
+      jobWorker.start();
+      stopExpiryScheduler = startExpiryScheduler(new JobQueue(jobStore));
+    }
   } catch (error) {
     console.error('Failed to initialize:', error);
     process.exit(1);
@@ -104,6 +121,8 @@ if (/server(\.[cm]?[jt]s)?$/.test(entryPoint)) {
 process.on('SIGTERM', async () => {
   console.log('Shutting down...');
   paymentMonitorService.stop();
+  jobWorker.stop();
+  stopExpiryScheduler?.();
   await pool.end();
   process.exit(0);
 });
@@ -111,6 +130,8 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
   console.log('Shutting down...');
   paymentMonitorService.stop();
+  jobWorker.stop();
+  stopExpiryScheduler?.();
   await pool.end();
   process.exit(0);
 });

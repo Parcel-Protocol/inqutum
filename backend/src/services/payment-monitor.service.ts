@@ -27,9 +27,6 @@ class PaymentMonitorService {
       this.handleError.bind(this)
     );
 
-    // Start periodic check for expired invoices
-    this.startExpirationCheck();
-
     console.log('✅ Payment monitor started successfully');
   }
 
@@ -176,19 +173,6 @@ class PaymentMonitorService {
         this.start();
       }
     }, 5000);
-  }
-
-  /**
-   * Start periodic check for expired invoices
-   */
-  private startExpirationCheck() {
-    setInterval(async () => {
-      try {
-        await invoiceService.markExpiredInvoices();
-      } catch (error) {
-        console.error('Error checking expired invoices:', error);
-      }
-    }, 60000); // Check every minute
   }
 
   /**

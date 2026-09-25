@@ -13,6 +13,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "start:pg": "node dist/server.js",
+    "worker": "tsx src/worker.ts",
+    "start:worker": "node dist/worker.js",
     "start:mvp": "tsx src/server-mvp.ts",
     "start:mvp:prod": "node dist/server-mvp.js",
     "deploy:smoke": "node ../scripts/deploy-smoke.mjs",
