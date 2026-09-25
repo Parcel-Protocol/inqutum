@@ -72,6 +72,41 @@ describe('Invoice persistence on Postgres', { skip: DATABASE_URL ? false : 'DATA
     }
   });
 
+  it('reports overdue PENDING invoices without transitioning them', async () => {
+    const pool = new Pool({ connectionString: DATABASE_URL });
+    const service = new InvoiceService(pool);
+    const seller = Keypair.random().publicKey();
+
+    try {
+      const ids: string[] = [];
+      for (let i = 0; i < 3; i++) ids.push((await service.createInvoice(createInput(seller))).id);
+      await pool.query(
+        "UPDATE invoices SET expires_at = NOW() - make_interval(hours => $2::int) WHERE id = $1",
+        [ids[0], 2]
+      );
+      await pool.query(
+        "UPDATE invoices SET expires_at = NOW() - make_interval(hours => $2::int) WHERE id = $1",
+        [ids[1], 1]
+      );
+
+      // Other test data may share the table, so scope assertions to this seller's rows.
+      const overdue = await service.findOverduePendingInvoices(new Date(), 1000);
+      const mine = overdue.invoices.filter(inv => inv.sellerPublicKey === seller).map(inv => inv.id);
+      assert.deepEqual(mine, [ids[0], ids[1]]); // oldest expiry first
+      assert.ok(overdue.total >= 2);
+
+      const limited = await service.findOverduePendingInvoices(new Date(), 1);
+      assert.equal(limited.invoices.length, 1);
+      assert.equal(limited.total, overdue.total);
+
+      const { rows } = await pool.query('SELECT status FROM invoices WHERE id = $1', [ids[0]]);
+      assert.equal(rows[0].status, 'PENDING');
+    } finally {
+      await pool.query('DELETE FROM invoices WHERE seller_public_key = $1', [seller]);
+      await pool.end();
+    }
+  });
+
   it('persists all seller metadata, asset issuer, customer and expiry fields on create', async () => {
     const pool = new Pool({ connectionString: DATABASE_URL });
     const service = new InvoiceService(pool);

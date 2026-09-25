@@ -18,7 +18,7 @@ function tokenMatches(provided: string, expected: string): boolean {
 }
 
 /** Job inspection is maintainer-only: payloads and stack traces are internal. */
-function requireAdmin(adminToken?: string) {
+export function requireAdmin(adminToken?: string) {
   return (req: Request, res: Response, next: NextFunction) => {
     const token = adminToken ?? process.env.JOBS_ADMIN_TOKEN;
     if (!token) {
