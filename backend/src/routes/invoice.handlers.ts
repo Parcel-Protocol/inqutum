@@ -23,6 +23,8 @@ import { simulationAllowed } from '../config/runtime';
 import { metrics } from '../observability/telemetry';
 import { exportAuditEvents, AuditAction } from '../audit/audit-service';
 import { classifyError } from '../errors/error-taxonomy';
+import { NotificationService, notificationService } from '../notifications/notification-service';
+import type { VerificationCode } from '../services/payment-verification';
 
 /** Kept explicit so clients can tune polling without duplicating backend policy. */
 export const PAYMENT_STATUS_POLL_INTERVAL_MS = 3000;
@@ -39,6 +41,8 @@ export interface InvoiceHandlerOptions {
   /** Optional local-test override. Production always forces simulation off. */
   allowSimulate?: boolean;
   stellar?: TransactionLookup;
+  /** Defaults to the process-wide notification service. */
+  notifications?: NotificationService;
 }
 
 export interface InvoiceHandlers {
@@ -85,6 +89,18 @@ function getUserAgent(req: Request): string | undefined {
 export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHandlers {
   const { storage } = options;
   const stellar: TransactionLookup = options.stellar || stellarService;
+  const notifications = options.notifications ?? notificationService;
+
+  // Notifications are a side effect: a failure here must never fail the request.
+  const safely = (label: string, fn: () => unknown) => {
+    try {
+      fn();
+    } catch (err) {
+      logError(`Notification error (${label}):`, err);
+    }
+  };
+  const syncNotifications = (invoice: StoredInvoice) =>
+    safely('sync', () => notifications.syncInvoiceNotifications(invoice));
 
   const frontendUrl = () =>
     options.frontendUrl || process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -242,6 +258,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           metadata: { invoiceId: invoice.id, status: invoice.status },
         });
 
+        syncNotifications(invoice);
         sendSuccess(res, 200, invoice);
       } catch (error: any) {
         const duration = performance.now() - start;
@@ -310,6 +327,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           metadata: { sellerPublicKey, count: invoices.length, limit, offset },
         });
 
+        invoices.forEach(syncNotifications);
         sendSuccess(res, 200, invoices, {
           pagination: { limit, offset, total: invoices.length },
         });
@@ -440,6 +458,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           metadata: { invoiceId: invoice.id },
         });
 
+        syncNotifications(invoice);
         sendSuccess(res, 200, invoice);
       } catch (error: any) {
         const duration = performance.now() - start;
@@ -587,6 +606,9 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
             http_status: 400,
             error_code: verification.code,
           });
+          safely('rejected', () =>
+            notifications.notifyPaymentRejected(invoice, verification.code as VerificationCode, hashCheck.value)
+          );
           return sendVerificationFailure(res, 400, verification.code, verification.error, corrId);
         }
 
@@ -676,6 +698,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         });
         metrics.recordFunnelStage('payment_verified');
 
+        syncNotifications(updatedInvoice);
         sendSuccess(res, 200, updatedInvoice, {
           message: 'Payment verified on Stellar',
           correlationId: corrId,
@@ -835,6 +858,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           metadata: { invoiceId: updatedInvoice.id, mockTxHash },
         });
 
+        syncNotifications(updatedInvoice);
         sendSuccess(res, 200, updatedInvoice, {
           message: 'Payment simulated successfully',
           correlationId: corrId,
