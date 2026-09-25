@@ -8,6 +8,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { createInvoiceRouter } from './routes/invoice.routes';
 import { createAuditRouter } from './routes/audit.routes';
+import { createExportRouter } from './routes/export.routes';
 import { createNotificationRouter } from './routes/notification.routes';
 import { createObservabilityRouter } from './routes/observability.routes';
 import memoryInvoiceStorage from './storage/memory-invoice-storage';
@@ -57,6 +58,7 @@ app.use('/api', createInvoiceRouter({ storage: memoryInvoiceStorage }));
 app.use('/api', createAuditRouter({ storage: memoryInvoiceStorage }));
 app.use('/api', createObservabilityRouter({ storage: memoryInvoiceStorage }));
 app.use('/api', createNotificationRouter());
+app.use('/api', createExportRouter({ storage: memoryInvoiceStorage }));
 
 // Mock Stellar endpoint (MVP only)
 app.get('/api/stellar/account', (req: Request, res: Response) => {

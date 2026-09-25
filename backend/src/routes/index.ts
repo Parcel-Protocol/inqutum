@@ -4,6 +4,7 @@ import paymentMonitorService from '../services/payment-monitor.service';
 import postgresInvoiceStorage from '../storage/postgres-invoice-storage';
 import { createInvoiceRouter } from './invoice.routes';
 import { createAuditRouter } from './audit.routes';
+import { createExportRouter } from './export.routes';
 import { createNotificationRouter } from './notification.routes';
 import { createObservabilityRouter } from './observability.routes';
 import { healthHandler, readinessHandler } from '../health';
@@ -19,6 +20,7 @@ router.use(createInvoiceRouter({ storage: postgresInvoiceStorage }));
 router.use(createAuditRouter({ storage: postgresInvoiceStorage }));
 router.use(createObservabilityRouter({ storage: postgresInvoiceStorage }));
 router.use(createNotificationRouter());
+router.use(createExportRouter({ storage: postgresInvoiceStorage }));
 
 // Stellar routes
 router.get('/stellar/account', stellarController.getAccountInfo.bind(stellarController));
