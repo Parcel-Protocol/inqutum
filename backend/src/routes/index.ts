@@ -5,6 +5,7 @@ import postgresInvoiceStorage from '../storage/postgres-invoice-storage';
 import { createInvoiceRouter } from './invoice.routes';
 import { createPaymentMonitorRouter } from './payment-monitor.routes';
 import { healthHandler, readinessHandler } from '../health';
+import { PostgresIdempotencyStore } from '../idempotency/postgres-store';
 import { createAuthRouter } from './auth.routes';
 import { authenticate, requirePermission } from '../middleware/access-control';
 
@@ -15,7 +16,12 @@ router.get('/health', healthHandler(postgresInvoiceStorage.mode));
 router.get('/ready', readinessHandler(postgresInvoiceStorage.mode));
 
 // Invoice routes — same handlers the MVP server uses, backed by PostgreSQL
-router.use(createInvoiceRouter({ storage: postgresInvoiceStorage }));
+router.use(
+  createInvoiceRouter({
+    storage: postgresInvoiceStorage,
+    idempotencyStore: new PostgresIdempotencyStore(),
+  })
+);
 
 // Wallet sign-in and role introspection
 router.use(createAuthRouter());

@@ -11,6 +11,7 @@ import { resolveVerificationError } from './verification';
 import { Networks } from '@stellar/stellar-sdk';
 import { createSessionManager, installWalletAuth } from './auth-session.ts';
 import { useWalletStore } from './store';
+import { newIdempotencyKey } from './idempotency-key.ts';
 
 const USE_MOCK_API = process.env.NEXT_PUBLIC_USE_MOCK === 'true';
 export const API_CONFIG = resolveApiConfig(
@@ -114,10 +115,12 @@ export const invoiceApi = USE_MOCK_API ? mockInvoiceApi : {
     network?: string;
   }) => {
     const normalizedAssetCode = data.assetCode ? data.assetCode.toUpperCase() : 'XLM';
-    const response = await api.post('/invoices', {
-      ...data,
-      assetCode: normalizedAssetCode,
-    });
+    // A retried submission must not create a second invoice (docs/IDEMPOTENCY.md).
+    const response = await api.post(
+      '/invoices',
+      { ...data, assetCode: normalizedAssetCode },
+      { headers: { 'Idempotency-Key': newIdempotencyKey() } }
+    );
     return response.data;
   },
 
@@ -144,17 +147,25 @@ export const invoiceApi = USE_MOCK_API ? mockInvoiceApi : {
   },
 
   cancel: async (id: string, sellerPublicKey?: string) => {
-    const response = await api.post(`/invoices/${id}/cancel`, { sellerPublicKey });
+    const response = await api.post(
+      `/invoices/${id}/cancel`,
+      { sellerPublicKey },
+      { headers: { 'Idempotency-Key': newIdempotencyKey() } }
+    );
     return response.data;
   },
 
   verify: async (id: string, txHash: string, payerInfo?: { payerName?: string; payerEmail?: string }) => {
-    const response = await api.post(`/invoices/${id}/verify`, {
-      txHash,
-      // Lets the server reject a payment submitted from the wrong wallet network.
-      network: process.env.NEXT_PUBLIC_STELLAR_NETWORK,
-      ...payerInfo
-    });
+    const response = await api.post(
+      `/invoices/${id}/verify`,
+      {
+        txHash,
+        // Lets the server reject a payment submitted from the wrong wallet network.
+        network: process.env.NEXT_PUBLIC_STELLAR_NETWORK,
+        ...payerInfo
+      },
+      { headers: { 'Idempotency-Key': newIdempotencyKey() } }
+    );
     return response.data;
   },
 

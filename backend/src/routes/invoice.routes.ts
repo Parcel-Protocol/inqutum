@@ -2,6 +2,9 @@ import { Router, Request, Response, NextFunction, RequestHandler } from 'express
 import { createInvoiceHandlers, isSimulationEnabled, InvoiceHandlerOptions } from './invoice.handlers';
 import { authenticate, requirePermission } from '../middleware/access-control';
 import { sendFailure } from '../types/api';
+import { idempotency } from '../idempotency/middleware';
+import { MemoryIdempotencyStore } from '../idempotency/memory-store';
+import type { IdempotencyStore } from '../idempotency/store';
 import {
   createInvoiceRateLimiters,
   createVerifyRateLimiters,
@@ -16,6 +19,12 @@ export interface InvoiceRouterOptions extends InvoiceHandlerOptions {
   enableConcurrencyLock?: boolean;
   enableCeilingCheck?: boolean;
   invoiceCeiling?: number;
+  /**
+   * Where `Idempotency-Key` outcomes are remembered. Defaults to an in-process
+   * store; the Postgres server passes the durable one so retries survive a
+   * restart and reach whichever instance handles them.
+   */
+  idempotencyStore?: IdempotencyStore;
 }
 
 /**
@@ -34,6 +43,9 @@ export interface InvoiceRouterOptions extends InvoiceHandlerOptions {
  *   POST   /invoices/:id/simulate-payment
  *   GET    /invoices/:id/audit
  *
+ * The four writes (create, cancel, verify, simulate) honour an optional
+ * `Idempotency-Key` header; see docs/IDEMPOTENCY.md.
+ *
  * Every route declares the permission it needs (see shared/access-control.ts),
  * checked before any handler runs. Handlers then apply the resource-level rule
  * for owner-scoped permissions ("only your own invoices"). A route added here
@@ -42,6 +54,9 @@ export interface InvoiceRouterOptions extends InvoiceHandlerOptions {
 export function createInvoiceRouter(options: InvoiceRouterOptions): Router {
   const handlers = createInvoiceHandlers(options);
   const router = Router();
+  const retrySafe = idempotency({
+    store: options.idempotencyStore ?? new MemoryIdempotencyStore(),
+  });
 
   // Resolve the caller on every invoice route. This never rejects; the
   // per-route guards below decide.
@@ -76,6 +91,9 @@ export function createInvoiceRouter(options: InvoiceRouterOptions): Router {
   router.post(
     '/invoices',
     requirePermission('invoice:create'),
+    // Before the ceiling and rate limits: a retry of a create that already
+    // succeeded is a replay, not new load, and must not be refused as "full".
+    retrySafe,
     ...createMiddlewares,
     handlers.createInvoice
   );
@@ -130,6 +148,7 @@ export function createInvoiceRouter(options: InvoiceRouterOptions): Router {
   router.post(
     '/invoices/:id/cancel',
     requirePermission('invoice:cancel'),
+    retrySafe,
     ...cancelMiddlewares,
     handlers.cancelInvoice
   );
@@ -144,6 +163,7 @@ export function createInvoiceRouter(options: InvoiceRouterOptions): Router {
   router.post(
     '/invoices/:id/verify',
     requirePermission('invoice:verify'),
+    retrySafe,
     ...verifyMiddlewares,
     handlers.verifyPayment
   );
@@ -158,6 +178,7 @@ export function createInvoiceRouter(options: InvoiceRouterOptions): Router {
     '/invoices/:id/simulate-payment',
     simulationSwitch,
     requirePermission('invoice:simulate'),
+    retrySafe,
     handlers.simulatePayment
   );
 

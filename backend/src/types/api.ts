@@ -37,7 +37,8 @@ export type ApiErrorCode =
   | 'IDEMPOTENCY_KEY_REQUIRED'
   | 'IDEMPOTENCY_KEY_CONFLICT'
   | 'IDEMPOTENCY_KEY_EXPIRED'
-  | 'IDEMPOTENCY_IN_PROGRESS';
+  | 'IDEMPOTENCY_IN_PROGRESS'
+  | 'IDEMPOTENCY_STORE_UNAVAILABLE';
 
 export interface ApiFailure {
   success: false;

@@ -82,6 +82,23 @@ CREATE TABLE IF NOT EXISTS payment_monitor_checkpoints (
   PRIMARY KEY (account, network)
 );
 
+-- Idempotency keys (issue #44). One row per (actor, Idempotency-Key): the
+-- request fingerprint it was first used for, and the response to replay once
+-- that request succeeded. Rows stay past expires_at for a tombstone window so a
+-- late retry gets a clear "key expired" error rather than running again.
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+  scope TEXT NOT NULL,
+  key TEXT NOT NULL,
+  request_hash CHAR(64) NOT NULL,
+  status VARCHAR(16) NOT NULL CHECK (status IN ('IN_PROGRESS', 'COMPLETED')),
+  response_status INTEGER,
+  response_body JSONB,
+  locked_until TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (scope, key)
+);
+
 -- Wallet alignment: databases created before wallet-scoped sellers still have
 -- the unused users table and invoices.user_id column. Both are dropped here so
 -- re-running the migration converges on the wallet-only schema.
@@ -125,6 +142,7 @@ CREATE INDEX IF NOT EXISTS idx_invoices_memo ON invoices(memo);
 CREATE INDEX IF NOT EXISTS idx_invoices_created_at ON invoices(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_invoices_seller_created_at ON invoices(seller_public_key, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_invoices_pending_expiry ON invoices(expires_at) WHERE status = 'PENDING';
+CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_keys(expires_at);
 CREATE INDEX IF NOT EXISTS idx_transactions_tx_hash ON transactions(tx_hash);
 CREATE INDEX IF NOT EXISTS idx_transactions_invoice_id ON transactions(invoice_id);
 
