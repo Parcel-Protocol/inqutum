@@ -3,6 +3,7 @@ import { CreateInvoiceInput } from '../utils/validation';
 import memoryStorage, { MemoryStorage } from '../storage/memory-storage';
 import { calculateInvoiceExpiry } from '../domain/invoice-expiry';
 import type { StoredInvoice } from '../storage/invoice-storage';
+import { compareNewestFirst, isAfterCursor, type InvoiceCursor } from '../storage/invoice-cursor';
 import type { InvoiceStats } from '../storage/invoice-stats';
 import type { PayerInfo } from '../storage/invoice-storage';
 
@@ -65,13 +66,17 @@ export class InvoiceMemoryService {
     sellerPublicKey: string,
     status?: string,
     limit: number = 50,
-    offset: number = 0
+    offset: number = 0,
+    after?: InvoiceCursor
   ): Promise<StoredInvoice[]> {
     let invoices = this.storage.getAllInvoices(status ? { status } : undefined);
 
     if (sellerPublicKey) {
       invoices = invoices.filter((inv) => inv.sellerPublicKey === sellerPublicKey);
     }
+
+    invoices.sort(compareNewestFirst);
+    if (after) invoices = invoices.filter((inv) => isAfterCursor(inv, after));
 
     return invoices.slice(offset, offset + limit);
   }
@@ -88,6 +93,11 @@ export class InvoiceMemoryService {
       throw new Error('Invoice not found or already processed');
     }
     return updated;
+  }
+
+  async findOverduePendingInvoices(cutoff: Date, limit: number) {
+    const overdue = this.storage.findOverduePending(cutoff);
+    return { total: overdue.length, invoices: overdue.slice(0, limit) };
   }
 
   async markExpiredInvoices(now?: Date): Promise<number> {

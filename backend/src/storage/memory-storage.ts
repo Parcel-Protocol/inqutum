@@ -103,6 +103,13 @@ class MemoryStorage {
   }
 
   // Mark expired invoices
+  /** Overdue PENDING invoices, without transitioning them. */
+  findOverduePending(cutoff: Date): Invoice[] {
+    return Array.from(this.invoices.values())
+      .filter((invoice) => isPendingInvoiceExpired(invoice, cutoff))
+      .sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime());
+  }
+
   markExpiredInvoices(now: Date = new Date()): number {
     let count = 0;
 

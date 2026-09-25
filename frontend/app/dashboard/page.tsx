@@ -25,11 +25,18 @@ export default function DashboardPage() {
   const { publicKey, connected } = useWalletStore();
   // Loaded data is tagged with the wallet it belongs to, so a response for a
   // previous seller can never be rendered under the current one.
-  const [loaded, setLoaded] = useState<{ owner: string | null; invoices: any[]; stats: any }>({
+  const [loaded, setLoaded] = useState<{
+    owner: string | null;
+    invoices: any[];
+    stats: any;
+    nextCursor: string | null;
+  }>({
     owner: null,
     invoices: [],
     stats: null,
+    nextCursor: null,
   });
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -53,7 +60,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!connected || !publicKey) {
-      setLoaded({ owner: null, invoices: [], stats: null });
+      setLoaded({ owner: null, invoices: [], stats: null, nextCursor: null });
       setLoading(false);
       return;
     }
@@ -78,6 +85,7 @@ export default function DashboardPage() {
           owner: publicKey,
           invoices: invoicesResult.data,
           stats: statsResult.data[0] || {},
+          nextCursor: invoicesResult.pagination?.nextCursor ?? null,
         });
       } catch (error) {
         if (!active) return;
@@ -94,6 +102,35 @@ export default function DashboardPage() {
       active = false;
     };
   }, [filter, connected, publicKey, reloadKey]);
+
+  const loadMore = async () => {
+    const cursor = loaded.nextCursor;
+    if (!cursor || !publicKey) return;
+    setLoadingMore(true);
+    try {
+      const page = await invoiceApi.getAll({
+        status: filter === 'all' ? undefined : filter.toUpperCase(),
+        limit: 50,
+        sellerPublicKey: publicKey,
+        cursor,
+      });
+      // Only append onto the page this cursor came from; a filter or wallet
+      // switch in the meantime has already replaced it.
+      setLoaded((prev) =>
+        prev.nextCursor === cursor
+          ? {
+              ...prev,
+              invoices: [...prev.invoices, ...page.data],
+              nextCursor: page.pagination?.nextCursor ?? null,
+            }
+          : prev
+      );
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Failed to load more invoices'));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const handleExportCSV = () => {
     const paidInvoices = exportableInvoices(filteredInvoices);
@@ -339,6 +376,20 @@ export default function DashboardPage() {
                     <InvoiceCard key={invoice.id} invoice={invoice as any} />
                   ))}
                 </div>
+                {loaded.nextCursor && (
+                  <div className="mt-6 text-center">
+                    <button
+                      type="button"
+                      onClick={() => void loadMore()}
+                      disabled={loadingMore}
+                      aria-busy={loadingMore}
+                      className="btn btn-outline"
+                    >
+                      {loadingMore && <Loader2 className="w-4 h-4 animate-spin" aria-hidden />}
+                      Load more invoices
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </>

@@ -60,6 +60,8 @@ export const invoiceApi = USE_MOCK_API ? mockInvoiceApi : {
     status?: string;
     limit?: number;
     offset?: number;
+    /** pagination.nextCursor from the previous page; stable under inserts, unlike offset. */
+    cursor?: string;
   }) => {
     const response = await api.get('/invoices', { params });
     return response.data;

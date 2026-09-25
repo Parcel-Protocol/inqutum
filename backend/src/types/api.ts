@@ -16,6 +16,9 @@ export interface ApiPagination {
   limit: number;
   offset: number;
   total: number;
+  /** Keyset cursor for the next page; null when this is the last page. */
+  nextCursor?: string | null;
+  hasMore?: boolean;
 }
 
 export interface ApiSuccess<T> {

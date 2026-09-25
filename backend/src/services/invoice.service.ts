@@ -4,6 +4,7 @@ import { generateInvoiceMemo } from '../utils/memo';
 import { CreateInvoiceInput } from '../utils/validation';
 import type { InvoiceStats } from '../storage/invoice-stats';
 import { calculateInvoiceExpiry } from '../domain/invoice-expiry';
+import type { InvoiceCursor } from '../storage/invoice-cursor';
 
 // PostgreSQL invoice service. Kept behaviourally identical to
 // InvoiceMemoryService so callers that go through the shared InvoiceStorage
@@ -173,7 +174,8 @@ export class InvoiceService {
     sellerPublicKey: string,
     status?: string,
     limit: number = 50,
-    offset: number = 0
+    offset: number = 0,
+    after?: InvoiceCursor
   ): Promise<Invoice[]> {
     if (!sellerPublicKey) {
       throw new Error('Seller public key is required');
@@ -189,7 +191,16 @@ export class InvoiceService {
       params.push(status);
     }
 
-    query += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
+    // created_at is truncated to ms so the cursor (a JS Date) compares exactly.
+    // ponytail: truncation defeats idx_invoices_seller_created_at for the sort; per-seller
+    // lists are small. Add an expression index on date_trunc if a seller reaches ~100k rows.
+    const sortKey = "date_trunc('milliseconds', created_at)";
+    if (after) {
+      query += ` AND (${sortKey}, id) < ($${params.length + 1}::timestamptz, $${params.length + 2}::uuid)`;
+      params.push(after.createdAt.toISOString(), after.id);
+    }
+
+    query += ` ORDER BY ${sortKey} DESC, id DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     params.push(limit, offset);
 
     const result = await this.db.query(query, params);
@@ -220,6 +231,29 @@ export class InvoiceService {
   /**
    * Mark expired invoices
    */
+  /** Read-only: PENDING rows past expiry that no sweep has transitioned yet. */
+  async findOverduePendingInvoices(
+    cutoff: Date,
+    limit: number
+  ): Promise<{ total: number; invoices: Array<Pick<Invoice, 'id' | 'sellerPublicKey' | 'expiresAt'>> }> {
+    const result = await this.db.query(
+      `SELECT id, seller_public_key, expires_at, COUNT(*) OVER () AS total
+       FROM invoices
+       WHERE status = 'PENDING' AND expires_at <= $1
+       ORDER BY expires_at ASC
+       LIMIT $2`,
+      [cutoff, limit]
+    );
+    return {
+      total: Number(result.rows[0]?.total ?? 0),
+      invoices: result.rows.map((row) => ({
+        id: row.id,
+        sellerPublicKey: row.seller_public_key,
+        expiresAt: new Date(row.expires_at),
+      })),
+    };
+  }
+
   async markExpiredInvoices(now: Date = new Date()): Promise<number> {
     const query = `
       UPDATE invoices 

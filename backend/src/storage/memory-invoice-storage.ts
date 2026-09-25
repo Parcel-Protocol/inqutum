@@ -1,7 +1,8 @@
 import { InvoiceMemoryService } from '../services/invoice-memory.service';
 import { CreateInvoiceInput } from '../utils/validation';
+import type { InvoiceCursor } from './invoice-cursor';
 import type { InvoiceStats } from './invoice-stats';
-import type { InvoiceStorage, PayerInfo, StoredInvoice } from './invoice-storage';
+import type { InvoiceStorage, OverduePendingInvoices, PayerInfo, StoredInvoice } from './invoice-storage';
 import { auditStore, AuditEvent, AuditFilter, AuditQueryResult } from '../audit/audit-service';
 
 export class MemoryInvoiceStorage implements InvoiceStorage {
@@ -22,9 +23,10 @@ export class MemoryInvoiceStorage implements InvoiceStorage {
     sellerPublicKey: string,
     status?: string,
     limit = 50,
-    offset = 0
+    offset = 0,
+    after?: InvoiceCursor
   ): Promise<StoredInvoice[]> {
-    return this.service.getInvoicesBySeller(sellerPublicKey, status, limit, offset);
+    return this.service.getInvoicesBySeller(sellerPublicKey, status, limit, offset, after);
   }
 
   async cancelInvoice(id: string): Promise<StoredInvoice> {
@@ -46,6 +48,10 @@ export class MemoryInvoiceStorage implements InvoiceStorage {
 
   async markExpiredInvoices(now?: Date): Promise<number> {
     return this.service.markExpiredInvoices(now);
+  }
+
+  async findOverduePendingInvoices(cutoff: Date, limit: number): Promise<OverduePendingInvoices> {
+    return this.service.findOverduePendingInvoices(cutoff, limit);
   }
 
   async recordAuditEvent(event: Omit<AuditEvent, 'id' | 'timestamp'> & { timestamp?: string }): Promise<AuditEvent> {

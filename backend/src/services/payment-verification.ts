@@ -19,6 +19,7 @@ import {
 } from '../utils/asset-helpers';
 import { sanitizePlainText } from '../security/content-safety';
 import { amountsMatch as stroopAmountsMatch } from '../utils/verify-amount-tolerance';
+import { isFeatureEnabled } from '../config/feature-flags';
 
 export type VerificationCode =
   | 'MISSING_TX_HASH'
@@ -243,8 +244,13 @@ function transactionForVerification(transaction: HorizonTransactionLike): Horizo
     : transaction;
 }
 
+/**
+ * Exact stroop match unless the `paymentAmountTolerance` flag is on, which
+ * widens the window to ±1 stroop. Checked server-side on every verification.
+ */
 export function amountsMatch(actual: unknown, expected: string | number): boolean {
-  return stroopAmountsMatch(expected, actual, 0);
+  const toleranceStroops = isFeatureEnabled('paymentAmountTolerance') ? 1 : 0;
+  return stroopAmountsMatch(expected, actual, toleranceStroops);
 }
 
 /**
