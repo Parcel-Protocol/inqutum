@@ -703,11 +703,13 @@ describe('shared invoice router', () => {
   it('exposes the same routes for both backends', () => {
     const expected = [
       'POST /invoices',
-      // stats must stay ahead of /invoices/:id or the dynamic route shadows it
+      // static routes must stay ahead of /invoices/:id or the dynamic route shadows them
+      'GET /invoices/lifecycle',
       'GET /invoices/stats',
       'GET /invoices',
       'GET /invoices/:id',
       'GET /invoices/:id/payment-info',
+      'GET /invoices/:id/audit',
       'POST /invoices/:id/cancel',
       'POST /invoices/:id/verify',
       'POST /invoices/:id/simulate-payment',

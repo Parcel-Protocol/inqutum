@@ -6,6 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import type { AddressInfo } from 'node:net';
 import app from '../src/server-mvp';
+import { maintainerAuth } from './fixtures/auth.fixture';
 import memoryStorage from '../src/storage/memory-storage';
 import invoiceMemoryService from '../src/services/invoice-memory.service';
 import paymentMonitorService, {
@@ -13,6 +14,14 @@ import paymentMonitorService, {
   PaymentPageSource,
 } from '../src/services/payment-monitor.service';
 import { FilePaymentMonitorCheckpointStore } from '../src/services/payment-monitor-checkpoint';
+
+// The code under test logs every request and error. Written to stdout at the
+// same time the test runner streams its own results back, that output
+// intermittently corrupts the runner's stream and fails the whole file with
+// "Unable to deserialize cloned data", so it is silenced here.
+for (const method of ['log', 'warn', 'error'] as const) {
+  console[method] = () => undefined;
+}
 
 const SELLER = 'GB3Q3VRHH3OQDYITTLONDLEHWQGKB27T2BEDSFHIUMOERULVXPDXRKG4';
 const PAYER = 'GB6IHEZ4QNOHJZRYRFLOC45P4SK3KKL6KNPI5WEG6FNVSZ2K5FS2MNY7';
@@ -22,7 +31,8 @@ function jsonRequest(
   port: number,
   method: string,
   path: string,
-  body?: unknown
+  body?: unknown,
+  extraHeaders: Record<string, string> = {}
 ): Promise<{ status: number; body: any }> {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
@@ -35,6 +45,7 @@ function jsonRequest(
         agent: false,
         headers: {
           connection: 'close',
+          ...extraHeaders,
           ...(payload
             ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) }
             : {}),
@@ -95,14 +106,14 @@ describe('server-mvp payment monitor integration', () => {
   });
 
   it('exposes GET /api/payment/monitor/status with running state', async () => {
-    const res = await jsonRequest(port, 'GET', '/api/payment/monitor/status');
+    const res = await jsonRequest(port, 'GET', '/api/payment/monitor/status', undefined, maintainerAuth());
     assert.equal(res.status, 200);
     assert.equal(res.body.success, true);
     assert.ok(typeof res.body.data.state === 'string');
   });
 
   it('exposes POST /api/payment/sync with success response', async () => {
-    const res = await jsonRequest(port, 'POST', '/api/payment/sync', { limit: 25 });
+    const res = await jsonRequest(port, 'POST', '/api/payment/sync', { limit: 25 }, maintainerAuth());
     assert.equal(res.status, 200);
     assert.equal(res.body.success, true);
     assert.equal(res.body.limit, 25);

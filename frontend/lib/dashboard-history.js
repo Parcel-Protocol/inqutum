@@ -13,7 +13,7 @@
 
 /** Invoice statuses the dashboard can filter by, plus the catch-all. */
 const INVOICE_FILTERS = Object.freeze(['all', 'pending', 'paid', 'expired', 'cancelled']);
-const { applyExpiryLifecycle, isActionableInvoice } = require('./invoice-lifecycle');
+const { applyExpiryLifecycle, isActionableInvoice, canCancelInvoice } = require('./invoice-lifecycle');
 const { sortKeyForInvoice } = require('./history-sort-key.ts');
 
 /**
@@ -88,8 +88,7 @@ function isInvoiceCancellable(invoice, sellerPublicKey, now) {
   if (sellerPublicKey && invoice.sellerPublicKey && invoice.sellerPublicKey !== sellerPublicKey) {
     return false;
   }
-  const actionable = isActionableInvoice(invoice, now);
-  return actionable && invoice.status === 'PENDING';
+  return canCancelInvoice(invoice, now);
 }
 
 /** The empty dashboard, used on disconnect and on every wallet switch. */

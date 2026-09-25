@@ -235,6 +235,28 @@ export function createCancelInvoiceRateLimiter(
   );
 }
 
+/**
+ * Per-invoice verification budget checked inside the handler, so it also applies
+ * when the handler is mounted without the router-level limiters. Uses its own
+ * key space (`verify_invoice:handler:`) so it never double-counts the router
+ * middleware's `verify_invoice:target:` bucket.
+ */
+export const VERIFY_PER_INVOICE_LIMIT = { max: 10, windowMs: 60_000 };
+
+export async function checkInvoiceVerifyLimit(
+  invoiceId: string,
+  store: MemoryRateLimiterStore = defaultLimiterStore
+): Promise<{ allowed: boolean; retryAfter?: number }> {
+  const result = store.consume(
+    `verify_invoice:handler:${invoiceId}`,
+    VERIFY_PER_INVOICE_LIMIT.max,
+    VERIFY_PER_INVOICE_LIMIT.windowMs
+  );
+  return result.allowed
+    ? { allowed: true }
+    : { allowed: false, retryAfter: result.resetAfterSeconds };
+}
+
 const inFlightVerifications = new Set<string>();
 
 /**

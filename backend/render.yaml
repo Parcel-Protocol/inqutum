@@ -27,3 +27,9 @@ services:
         sync: false
       - key: FRONTEND_URLS
         sync: false
+      - key: AUTH_SESSION_SECRET
+        generateValue: true
+      - key: MAINTAINER_API_TOKENS
+        sync: false
+      - key: SERVICE_API_TOKENS
+        sync: false

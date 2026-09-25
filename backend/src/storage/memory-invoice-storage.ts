@@ -1,7 +1,14 @@
 import { InvoiceMemoryService } from '../services/invoice-memory.service';
 import { CreateInvoiceInput } from '../utils/validation';
 import type { InvoiceStats } from './invoice-stats';
-import type { InvoiceStorage, MarkAsPaidOptions, PayerInfo, StoredInvoice } from './invoice-storage';
+import type { ReconciliationInvoice, ReconciliationSettlement } from '../domain/reconciliation';
+import type {
+  AuditEvent,
+  InvoiceStorage,
+  MarkAsPaidOptions,
+  PayerInfo,
+  StoredInvoice,
+} from './invoice-storage';
 
 export class MemoryInvoiceStorage implements InvoiceStorage {
   readonly mode = 'in-memory';
@@ -46,6 +53,27 @@ export class MemoryInvoiceStorage implements InvoiceStorage {
 
   async markExpiredInvoices(now?: Date): Promise<number> {
     return this.service.markExpiredInvoices(now);
+  }
+
+  async getAuditTrail(invoiceId: string): Promise<AuditEvent[]> {
+    return this.service.getAuditTrail(invoiceId);
+  }
+
+  async listInvoicesForReconciliation(): Promise<ReconciliationInvoice[]> {
+    return this.service.listInvoicesForReconciliation();
+  }
+
+  async listAuditEvents(): Promise<AuditEvent[]> {
+    return this.service.listAuditEvents();
+  }
+
+  async readInvoiceStats(sellerPublicKey: string): Promise<InvoiceStats[]> {
+    return this.service.readInvoiceStats(sellerPublicKey);
+  }
+
+  /** The memory backend records no settlement references apart from the invoices. */
+  async listSettlements(): Promise<ReconciliationSettlement[] | null> {
+    return null;
   }
 
   async countInvoices(): Promise<number> {

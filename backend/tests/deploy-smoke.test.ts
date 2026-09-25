@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import { walletAuth } from './fixtures/auth.fixture.ts';
 
 const SELLER = 'GB3Q3VRHH3OQDYITTLONDLEHWQGKB27T2BEDSFHIUMOERULVXPDXRKG4';
 
@@ -52,7 +53,11 @@ describe('deployed MVP smoke contract', () => {
   it('creates and reads an invoice through the public HTTP contract', async () => {
     const createdResponse = await fetch(`${baseUrl}/api/invoices`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', origin: 'https://quittance.example' },
+      headers: {
+        'content-type': 'application/json',
+        origin: 'https://quittance.example',
+        ...walletAuth(SELLER),
+      },
       body: JSON.stringify({
         amount: 1,
         assetCode: 'XLM',

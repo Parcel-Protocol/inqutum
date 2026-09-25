@@ -9,6 +9,15 @@ import { MemoryInvoiceStorage } from '../src/storage/memory-invoice-storage';
 import { InvoiceMemoryService } from '../src/services/invoice-memory.service';
 import { MemoryStorage } from '../src/storage/memory-storage';
 import { resetRateLimiters } from '../src/middleware/rate-limit';
+import { walletAuth } from './fixtures/auth.fixture';
+
+// The code under test logs every request and error. Written to stdout at the
+// same time the test runner streams its own results back, that output
+// intermittently corrupts the runner's stream and fails the whole file with
+// "Unable to deserialize cloned data", so it is silenced here.
+for (const method of ['log', 'warn', 'error'] as const) {
+  console[method] = () => undefined;
+}
 
 interface HttpResponse {
   status: number;
@@ -150,7 +159,7 @@ describe('Abuse Controls Suite', () => {
         expiresAt: new Date(Date.now() + 86400000),
       });
 
-      const res = await request(port, 'POST', `/api/invoices/${created.id}/cancel`, {});
+      const res = await request(port, 'POST', `/api/invoices/${created.id}/cancel`, {}, walletAuth(sellerPublicKey));
       assert.equal(res.status, 401);
       assert.equal(res.body.success, false);
       assert.equal(res.body.code, 'UNAUTHORIZED');
@@ -173,7 +182,7 @@ describe('Abuse Controls Suite', () => {
       const res = await request(port, 'POST', `/api/invoices/${created.id}/cancel`, {
         sellerPublicKey: otherPublicKey,
         signature: fakeSig,
-      });
+      }, walletAuth(otherPublicKey));
 
       assert.equal(res.status, 401);
       assert.equal(res.body.success, false);
@@ -195,7 +204,7 @@ describe('Abuse Controls Suite', () => {
 
       const res = await request(port, 'POST', `/api/invoices/${created.id}/cancel`, {
         sellerPublicKey,
-      });
+      }, walletAuth(sellerPublicKey));
 
       assert.equal(res.status, 401);
       assert.equal(res.body.success, false);
@@ -219,7 +228,7 @@ describe('Abuse Controls Suite', () => {
       const res = await request(port, 'POST', `/api/invoices/${created.id}/cancel`, {
         sellerPublicKey,
         signature: corruptSig,
-      });
+      }, walletAuth(sellerPublicKey));
 
       assert.equal(res.status, 401);
       assert.equal(res.body.success, false);
@@ -243,7 +252,7 @@ describe('Abuse Controls Suite', () => {
       const res = await request(port, 'POST', `/api/invoices/${created.id}/cancel`, {
         sellerPublicKey,
         signature: validSig,
-      });
+      }, walletAuth(sellerPublicKey));
 
       assert.equal(res.status, 200);
       assert.equal(res.body.success, true);
@@ -261,7 +270,7 @@ describe('Abuse Controls Suite', () => {
           sellerPublicKey,
           amount: 10,
           assetCode: 'XLM',
-        });
+        }, walletAuth(sellerPublicKey));
         assert.equal(res.status, 201, `Request ${i + 1} should succeed`);
       }
 
@@ -269,7 +278,7 @@ describe('Abuse Controls Suite', () => {
         sellerPublicKey,
         amount: 10,
         assetCode: 'XLM',
-      });
+      }, walletAuth(sellerPublicKey));
 
       assert.equal(excessive.status, 429);
       assert.equal(excessive.body.success, false);
@@ -300,19 +309,19 @@ describe('Abuse Controls Suite', () => {
         const res1 = await request(ceilingPort, 'POST', '/api/invoices', {
           sellerPublicKey,
           amount: 1,
-        });
+        }, walletAuth(sellerPublicKey));
         assert.equal(res1.status, 201);
 
         const res2 = await request(ceilingPort, 'POST', '/api/invoices', {
           sellerPublicKey,
           amount: 2,
-        });
+        }, walletAuth(sellerPublicKey));
         assert.equal(res2.status, 201);
 
         const fullRes = await request(ceilingPort, 'POST', '/api/invoices', {
           sellerPublicKey,
           amount: 3,
-        });
+        }, walletAuth(sellerPublicKey));
 
         assert.equal(fullRes.status, 503);
         assert.equal(fullRes.body.success, false);
@@ -345,11 +354,11 @@ describe('Abuse Controls Suite', () => {
   describe('Scenario 5: Listing Rate Limiting', () => {
     it('rate limits GET /invoices beyond 60 requests per minute', async () => {
       for (let i = 0; i < 60; i++) {
-        const res = await request(port, 'GET', `/api/invoices?sellerPublicKey=${sellerPublicKey}`);
+        const res = await request(port, 'GET', `/api/invoices?sellerPublicKey=${sellerPublicKey}`, undefined, walletAuth(sellerPublicKey));
         assert.equal(res.status, 200);
       }
 
-      const excessive = await request(port, 'GET', `/api/invoices?sellerPublicKey=${sellerPublicKey}`);
+      const excessive = await request(port, 'GET', `/api/invoices?sellerPublicKey=${sellerPublicKey}`, undefined, walletAuth(sellerPublicKey));
       assert.equal(excessive.status, 429);
       assert.equal(excessive.body.success, false);
       assert.equal(excessive.body.code, 'RATE_LIMIT_EXCEEDED');

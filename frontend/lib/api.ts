@@ -1,6 +1,24 @@
 import axios from 'axios';
+import { mockInvoiceApi, mockStellarApi, mockHealthCheck } from './mock-api';
+import {
+  ApiUnavailableError,
+  apiErrorMessage,
+  isApiUnavailableError,
+  resolveApiConfig,
+  toApiError,
+} from './api-runtime';
+import { resolveVerificationError } from './verification';
+import { Networks } from '@stellar/stellar-sdk';
+import { createSessionManager, installWalletAuth } from './auth-session.ts';
+import { useWalletStore } from './store';
+import { newIdempotencyKey } from './idempotency-key.ts';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+const USE_MOCK_API = process.env.NEXT_PUBLIC_USE_MOCK === 'true';
+export const API_CONFIG = resolveApiConfig(
+  process.env.NEXT_PUBLIC_API_URL,
+  process.env.NODE_ENV
+);
+export const PAYMENT_STATUS_POLL_INTERVAL_MS = 3000;
 
 const api = axios.create({
   baseURL: API_CONFIG.baseUrl,
@@ -9,6 +27,39 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Sellers prove wallet ownership once per session (see docs/ACCESS-CONTROL.md);
+// this attaches the resulting token and signs in on demand when the server asks.
+// Installed before the error normaliser below so it sees the raw 401. Hidden
+// buttons are a courtesy: the server refuses unauthorised calls regardless.
+if (!USE_MOCK_API) {
+  const networkPassphrase =
+    (process.env.NEXT_PUBLIC_STELLAR_NETWORK || 'TESTNET').toUpperCase() === 'PUBLIC'
+      ? Networks.PUBLIC
+      : Networks.TESTNET;
+
+  installWalletAuth(
+    api,
+    createSessionManager({
+      getWallet: () => useWalletStore.getState().publicKey,
+      networkPassphrase,
+      storage: typeof window !== 'undefined' ? window.sessionStorage : null,
+      signChallenge: async (xdr) => {
+        const { signTransaction } = await import('@stellar/freighter-api');
+        const result: any = await signTransaction(xdr, { networkPassphrase });
+        const signed =
+          typeof result === 'string' ? result : result?.signedTxXdr ?? result?.signedTransaction;
+        if (!signed) throw new Error('Freighter did not return a signed sign-in challenge');
+        return signed;
+      },
+      // Bare axios: this call must not pass through the interceptor it serves.
+      exchange: async (transaction) => {
+        const response = await axios.post(`${API_CONFIG.baseUrl}/auth/session`, { transaction });
+        return response.data.data;
+      },
+    })
+  );
+}
 
 api.interceptors.response.use(
   (response) => response,
@@ -19,7 +70,37 @@ api.interceptors.response.use(
   }
 );
 
-export const invoiceApi = {
+/**
+ * Turns a failed request into an English sentence for a live region.
+ *
+ * A failed load used to reach the user only as a toast, which disappears, and
+ * as a console entry, which does not reach them at all, so a page that failed
+ * to load simply stayed blank for a screen-reader user (issue #289). The status
+ * regions on the pages read this instead.
+ *
+ * The backend's own wording is preferred because it is the most specific thing
+ * available; this mirrors `describeVerifyError` in `payment-page-state.js`,
+ * which does the same for the verify endpoint.
+ */
+export function describeApiError(error: any, fallback = 'Something went wrong.'): string {
+  const serverMessage = error?.response?.data?.error;
+  if (typeof serverMessage === 'string' && serverMessage.trim()) {
+    return serverMessage;
+  }
+
+  if (error?.response?.status === 404) {
+    return 'Not found.';
+  }
+
+  const transportMessage = error?.message;
+  if (typeof transportMessage === 'string' && transportMessage.trim()) {
+    return transportMessage;
+  }
+
+  return fallback;
+}
+
+export const invoiceApi = USE_MOCK_API ? mockInvoiceApi : {
   create: async (data: {
     amount: number;
     assetCode?: string;
@@ -34,10 +115,12 @@ export const invoiceApi = {
     network?: string;
   }) => {
     const normalizedAssetCode = data.assetCode ? data.assetCode.toUpperCase() : 'XLM';
-    const response = await api.post('/invoices', {
-      ...data,
-      assetCode: normalizedAssetCode,
-    });
+    // A retried submission must not create a second invoice (docs/IDEMPOTENCY.md).
+    const response = await api.post(
+      '/invoices',
+      { ...data, assetCode: normalizedAssetCode },
+      { headers: { 'Idempotency-Key': newIdempotencyKey() } }
+    );
     return response.data;
   },
 
@@ -64,17 +147,25 @@ export const invoiceApi = {
   },
 
   cancel: async (id: string, sellerPublicKey?: string) => {
-    const response = await api.post(`/invoices/${id}/cancel`, { sellerPublicKey });
+    const response = await api.post(
+      `/invoices/${id}/cancel`,
+      { sellerPublicKey },
+      { headers: { 'Idempotency-Key': newIdempotencyKey() } }
+    );
     return response.data;
   },
 
   verify: async (id: string, txHash: string, payerInfo?: { payerName?: string; payerEmail?: string }) => {
-    const response = await api.post(`/invoices/${id}/verify`, {
-      txHash,
-      // Lets the server reject a payment submitted from the wrong wallet network.
-      network: process.env.NEXT_PUBLIC_STELLAR_NETWORK,
-      ...payerInfo
-    });
+    const response = await api.post(
+      `/invoices/${id}/verify`,
+      {
+        txHash,
+        // Lets the server reject a payment submitted from the wrong wallet network.
+        network: process.env.NEXT_PUBLIC_STELLAR_NETWORK,
+        ...payerInfo
+      },
+      { headers: { 'Idempotency-Key': newIdempotencyKey() } }
+    );
     return response.data;
   },
 
@@ -87,7 +178,7 @@ export const invoiceApi = {
 };
 
 // Stellar APIs
-export const stellarApi = {
+export const stellarApi = USE_MOCK_API ? mockStellarApi : {
   getAccount: async (publicKey?: string) => {
     const response = await api.get('/stellar/account', {
       params: { publicKey },
@@ -118,7 +209,10 @@ export const stellarApi = {
 };
 
 // Health check
-export const healthCheck = async () => {
+export const healthCheck = USE_MOCK_API ? mockHealthCheck : async () => {
+  if (!API_CONFIG.configured) {
+    throw new ApiUnavailableError(API_CONFIG.error || undefined);
+  }
   const response = await api.get('/health');
   return response.data;
 };

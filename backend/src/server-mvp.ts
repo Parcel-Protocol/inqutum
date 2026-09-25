@@ -16,7 +16,9 @@ import { FilePaymentMonitorCheckpointStore } from './services/payment-monitor-ch
 import { SELLER_PUBLIC_KEY } from './config/stellar';
 import { configuredFrontendOrigins, corsOptions } from './config/runtime';
 import { healthHandler, readinessHandler } from './health';
-import bodyLimitMiddleware from './middleware/body-limit';
+import { createAuthRouter } from './routes/auth.routes';
+import { createReconciliationRouter } from './routes/reconciliation.routes';
+import { authenticate, requirePermission } from './middleware/access-control';
 
 dotenv.config();
 
@@ -60,11 +62,13 @@ app.get('/', (req: Request, res: Response) => {
 app.get('/api/health', healthHandler(memoryInvoiceStorage.mode));
 app.get('/api/ready', readinessHandler(memoryInvoiceStorage.mode));
 
+app.use('/api', createAuthRouter());
+app.use('/api', createReconciliationRouter({ storage: memoryInvoiceStorage }));
 app.use('/api', createInvoiceRouter({ storage: memoryInvoiceStorage }));
 app.use('/api', createPaymentMonitorRouter(paymentMonitorService));
 
 // Mock Stellar endpoint (MVP only)
-app.get('/api/stellar/account', (req: Request, res: Response) => {
+app.get('/api/stellar/account', authenticate(), requirePermission('stellar:read'), (req: Request, res: Response) => {
   const { publicKey } = req.query;
   res.json({
     success: true,

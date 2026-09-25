@@ -9,7 +9,14 @@ import {
   type LatePaymentWarningCode,
   type SettlementContext,
 } from '../domain/invoice-settlement';
-import type { MarkAsPaidOptions } from '../storage/invoice-storage';
+import {
+  InvalidTransitionError,
+  assertTransition,
+  type InvoiceEvent,
+  type InvoiceStatus,
+} from '../../../shared/invoice-lifecycle';
+import type { AuditEvent, MarkAsPaidOptions } from '../storage/invoice-storage';
+import type { ReconciliationInvoice, ReconciliationSettlement } from '../domain/reconciliation';
 
 // PostgreSQL invoice service. Kept behaviourally identical to
 // InvoiceMemoryService so callers that go through the shared InvoiceStorage
@@ -38,7 +45,7 @@ export interface Invoice {
   description?: string;
   customerName?: string;
   customerEmail?: string;
-  status: 'PENDING' | 'PAID' | 'EXPIRED' | 'CANCELLED';
+  status: InvoiceStatus;
   paymentTxHash?: string;
   payerPublicKey?: string;
   payerName?: string;
@@ -97,6 +104,7 @@ export class InvoiceService {
     try {
       const result = await this.db.query(query, values);
       console.log('✅ Invoice created:', result.rows[0].id);
+      await this.recordLifecycleEvent(result.rows[0].id, 'INVOICE_CREATED', { to: 'PENDING' });
       return this.mapRowToInvoice(result.rows[0]);
     } catch (error: any) {
       console.error('Error creating invoice:', error);
@@ -205,17 +213,35 @@ export class InvoiceService {
 
       if (result.rows.length === 0) {
         const existing = await this.db.query('SELECT * FROM invoices WHERE id = $1', [invoiceId]);
-        if (existing.rows[0]?.status === 'CANCELLED' && !settledAt) {
+        const row = existing.rows[0];
+        if (!row) {
+          throw new Error('Invoice not found');
+        }
+        if (row.status === 'CANCELLED' && !settledAt) {
           throw new SettlementTimeUnavailableError();
         }
-        throw new Error('Invoice not found, expired, or already processed');
+        // The guarded UPDATE matched nothing, so the invoice is not in a state
+        // that can settle. Ask the lifecycle why, so the refusal is the same
+        // one the memory store gives. A PENDING row that reached this point
+        // has crossed its expiry, which the sweep had not yet recorded.
+        const pastExpiry = row.status === 'PENDING' && new Date(row.expires_at).getTime() <= Date.now();
+        const current: string = pastExpiry ? 'EXPIRED' : row.status;
+        const event: InvoiceEvent = current === 'CANCELLED' ? 'SETTLE_AFTER_CANCEL' : 'SETTLE';
+        assertTransition(current, event);
+        // Unreachable when the lifecycle and the UPDATE's WHERE clause agree;
+        // reaching it means they drifted, which must not pass silently.
+        throw new InvalidTransitionError(current, 'PAID', event);
       }
 
       console.log('✅ Invoice marked as paid:', invoiceId);
 
       return this.mapRowToInvoice(result.rows[0]);
     } catch (error: any) {
-      if (error instanceof SettlementTimeUnavailableError) {
+      if (
+        error instanceof SettlementTimeUnavailableError ||
+        error instanceof InvalidTransitionError ||
+        error?.message === 'Invoice not found'
+      ) {
         throw error;
       }
       console.error('Error marking invoice as paid:', error);
@@ -269,19 +295,24 @@ export class InvoiceService {
     const result = await this.db.query(query, [invoiceId, sellerPublicKey || null]);
 
     if (result.rows.length === 0) {
-      if (sellerPublicKey) {
-        const existing = await this.db.query('SELECT * FROM invoices WHERE id = $1', [invoiceId]);
-        if (
-          existing.rows.length > 0 &&
-          existing.rows[0].status === 'PENDING' &&
-          existing.rows[0].seller_public_key !== sellerPublicKey
-        ) {
-          throw new Error('Unauthorized: only the seller can cancel this invoice');
-        }
+      const existing = await this.db.query('SELECT * FROM invoices WHERE id = $1', [invoiceId]);
+      const row = existing.rows[0];
+      if (!row) {
+        throw new Error('Invoice not found');
       }
-      throw new Error('Invoice not found or already processed');
+      if (sellerPublicKey && row.seller_public_key !== sellerPublicKey) {
+        throw new Error('Unauthorized: only the seller can cancel this invoice');
+      }
+      // Same refusal the memory store gives for a cancel the lifecycle forbids.
+      assertTransition(row.status, 'CANCEL');
+      throw new InvalidTransitionError(row.status, 'CANCELLED', 'CANCEL');
     }
 
+    await this.recordLifecycleEvent(invoiceId, 'INVOICE_CANCELLED', {
+      from: 'PENDING',
+      to: 'CANCELLED',
+      actor: sellerPublicKey,
+    });
     return this.mapRowToInvoice(result.rows[0]);
   }
 
@@ -298,6 +329,9 @@ export class InvoiceService {
 
     const result = await this.db.query(query, [now]);
     console.log(`⏰ Marked ${result.rowCount} invoices as expired`);
+    for (const row of result.rows) {
+      await this.recordLifecycleEvent(row.id, 'INVOICE_EXPIRED', { from: 'PENDING', to: 'EXPIRED' });
+    }
     return result.rowCount || 0;
   }
 
@@ -314,6 +348,108 @@ export class InvoiceService {
   }
 
   /**
+   * Record a state change in the audit trail. The status write has already
+   * committed by the time this runs, so a failure here is logged rather than
+   * thrown: failing the request would tell the caller a committed transition
+   * did not happen, which is worse than a missing audit row.
+   */
+  private async recordLifecycleEvent(
+    invoiceId: string,
+    eventType: string,
+    eventData: Record<string, unknown>
+  ): Promise<void> {
+    try {
+      await this.logPaymentEvent(invoiceId, eventType, eventData);
+    } catch (error: any) {
+      console.error(`Failed to record ${eventType} audit event for ${invoiceId}:`, error?.message || error);
+    }
+  }
+
+  /**
+   * Every invoice as stored, for reconciliation. Read-only: no expiry sweep, and
+   * amounts stay as the exact decimal strings Postgres returns rather than being
+   * rounded through a float.
+   */
+  async listInvoicesForReconciliation(): Promise<ReconciliationInvoice[]> {
+    const result = await this.db.query('SELECT * FROM invoices ORDER BY created_at ASC, id ASC');
+    return result.rows.map((row) => ({
+      id: row.id,
+      sellerPublicKey: row.seller_public_key,
+      amount: String(row.amount),
+      assetCode: row.asset_code ?? undefined,
+      assetIssuer: row.asset_issuer ?? undefined,
+      memo: row.memo,
+      status: row.status,
+      paymentTxHash: row.payment_tx_hash,
+      payerPublicKey: row.payer_public_key,
+      paidAt: row.paid_at,
+      cancelledAt: row.cancelled_at,
+      settledAt: row.settled_at,
+      settlementContext: row.settlement_context,
+      priorStatus: row.prior_status,
+      expiresAt: row.expires_at,
+    }));
+  }
+
+  /** Every audit event, oldest first. Read-only. */
+  async listAuditEvents(): Promise<AuditEvent[]> {
+    const result = await this.db.query(
+      `SELECT id, invoice_id, event_type, event_data, created_at
+       FROM payment_events
+       ORDER BY created_at ASC, id ASC`
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      invoiceId: row.invoice_id,
+      eventType: row.event_type,
+      eventData: row.event_data ?? null,
+      createdAt: row.created_at,
+    }));
+  }
+
+  /**
+   * Payments the monitor recorded in `transactions`, as settlement references.
+   * Read-only. Not every settled invoice has one (the verify endpoint does not
+   * write here), which is why a missing row is reported as a warning.
+   */
+  async listSettlements(): Promise<ReconciliationSettlement[]> {
+    const result = await this.db.query(
+      `SELECT tx_hash, invoice_id, to_address, amount, asset_code, asset_issuer, memo
+       FROM transactions
+       ORDER BY processed_at ASC, tx_hash ASC`
+    );
+    return result.rows.map((row) => ({
+      txHash: row.tx_hash,
+      invoiceId: row.invoice_id,
+      destination: row.to_address,
+      amount: String(row.amount),
+      assetCode: row.asset_code,
+      assetIssuer: row.asset_issuer,
+      memo: row.memo,
+    }));
+  }
+
+  /**
+   * Audit trail for one invoice, oldest first.
+   */
+  async getAuditTrail(invoiceId: string): Promise<AuditEvent[]> {
+    const result = await this.db.query(
+      `SELECT id, invoice_id, event_type, event_data, created_at
+       FROM payment_events
+       WHERE invoice_id = $1
+       ORDER BY created_at ASC, id ASC`,
+      [invoiceId]
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      invoiceId: row.invoice_id,
+      eventType: row.event_type,
+      eventData: row.event_data ?? null,
+      createdAt: row.created_at,
+    }));
+  }
+
+  /**
    * Get invoice statistics
    */
   async getInvoiceStats(sellerPublicKey: string): Promise<InvoiceStats[]> {
@@ -322,6 +458,16 @@ export class InvoiceService {
     }
 
     await this.markExpiredInvoices();
+    return this.readInvoiceStats(sellerPublicKey);
+  }
+
+  /**
+   * Statistics without the expiry sweep, so reading them never writes.
+   */
+  async readInvoiceStats(sellerPublicKey: string): Promise<InvoiceStats[]> {
+    if (!sellerPublicKey) {
+      throw new Error('Seller public key is required');
+    }
 
     const query = `
       SELECT 

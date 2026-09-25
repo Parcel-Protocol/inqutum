@@ -147,6 +147,19 @@ Sellers manage their invoices from the dashboard and detail views:
 
 ---
 
+## Design notes: lifecycle, access control, retries, reconciliation
+
+| Topic | Doc |
+| ----- | --- |
+| Invoice state machine shared by API, stores and UI | [docs/LIFECYCLE.md](docs/LIFECYCLE.md) |
+| Roles, permissions and wallet sign-in | [docs/ACCESS-CONTROL.md](docs/ACCESS-CONTROL.md) |
+| Retry-safe writes with `Idempotency-Key` | [docs/IDEMPOTENCY.md](docs/IDEMPOTENCY.md) |
+| Read-only drift detection (`npm run reconcile`) | [docs/RECONCILIATION.md](docs/RECONCILIATION.md) |
+
+Sellers now sign in with their wallet before creating, listing or cancelling
+invoices. Set `AUTH_SESSION_SECRET` (and run `npm run db:migrate`) before deploying;
+see the docs above.
+
 ## Stack
 
 | Layer | Tech |

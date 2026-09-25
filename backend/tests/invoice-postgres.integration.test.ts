@@ -197,7 +197,7 @@ describe('Invoice persistence on Postgres', { skip: DATABASE_URL ? false : 'DATA
 
       await assert.rejects(
         () => service.markAsPaid(created.id, 'b'.repeat(64), PAYER),
-        /Invoice not found, expired, or already processed/
+        /Invalid invoice transition: EXPIRED -> PAID/
       );
 
       const fetched = await service.getInvoiceById(created.id);
@@ -217,7 +217,7 @@ describe('Invoice persistence on Postgres', { skip: DATABASE_URL ? false : 'DATA
 
       await assert.rejects(
         () => service.markAsPaid(created.id, 'd'.repeat(64), PAYER),
-        /Invoice not found, expired, or already processed/
+        /Invalid invoice transition: PAID -> PAID/
       );
     } finally {
       await pool.end();
@@ -236,7 +236,7 @@ describe('Invoice persistence on Postgres', { skip: DATABASE_URL ? false : 'DATA
 
       await assert.rejects(
         () => service.cancelInvoice(created.id),
-        /Invoice not found or already processed/
+        /Invalid invoice transition: CANCELLED -> CANCELLED/
       );
     } finally {
       await pool.end();

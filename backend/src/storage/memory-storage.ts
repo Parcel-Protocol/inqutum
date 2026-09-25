@@ -4,12 +4,18 @@ import type { InvoiceStats } from './invoice-stats';
 import { isPendingInvoiceExpired } from '../domain/invoice-expiry';
 import { settlementFieldsForInvoice } from '../domain/invoice-settlement';
 import {
+  InvalidTransitionError,
+  assertTransition,
+  canTransition,
+} from '../../../shared/invoice-lifecycle';
+import type { InvoiceEvent } from '../../../shared/invoice-lifecycle';
+import {
   MemoCollisionError,
   PaymentClaimError,
   PaymentClaimIndex,
 } from '../domain/payment-attribution';
 import type { PaymentClaim } from '../domain/payment-attribution';
-import type { MarkAsPaidOptions, StoredInvoice } from './invoice-storage';
+import type { AuditEvent, MarkAsPaidOptions, StoredInvoice } from './invoice-storage';
 
 export interface MemoryPaymentEvent {
   id: string;
@@ -27,6 +33,10 @@ class MemoryStorage {
   // Which invoice each transaction hash settled; see domain/payment-attribution.ts.
   private readonly paymentClaims = new PaymentClaimIndex();
   private paymentEvents: MemoryPaymentEvent[] = [];
+  // State-change events (created / cancelled / expired). Kept apart from
+  // paymentEvents, which callers read as "payment activity only"; the audit
+  // trail below presents the two as one ordered history.
+  private lifecycleEvents: MemoryPaymentEvent[] = [];
 
   createInvoice(data: Partial<Invoice>): Invoice {
     const invoice: Invoice = {
@@ -56,6 +66,7 @@ class MemoryStorage {
 
     this.invoices.set(invoice.id, invoice);
     this.invoicesByMemo.set(invoice.memo, invoice.id);
+    this.recordLifecycleEvent(invoice.id, 'INVOICE_CREATED', { to: 'PENDING' });
 
     console.log('✅ Invoice created in memory:', invoice.id);
     return invoice;
@@ -89,6 +100,12 @@ class MemoryStorage {
     const invoice = this.invoices.get(id);
     if (!invoice) return undefined;
 
+    // Last line of defence: whatever the caller intended, a status write that
+    // the lifecycle does not allow never reaches the record.
+    if (updates.status && updates.status !== invoice.status && !canTransition(invoice.status, updates.status)) {
+      throw new InvalidTransitionError(invoice.status, updates.status);
+    }
+
     const updated = { ...invoice, ...updates };
     this.invoices.set(id, updated);
 
@@ -100,11 +117,20 @@ class MemoryStorage {
   cancelInvoice(id: string, sellerPublicKey?: string): Invoice | undefined {
     this.markExpiredInvoices();
     const invoice = this.invoices.get(id);
-    if (!invoice || invoice.status !== 'PENDING') return undefined;
+    if (!invoice) return undefined;
     if (sellerPublicKey && invoice.sellerPublicKey !== sellerPublicKey) {
       throw new Error('Unauthorized: only the seller can cancel this invoice');
     }
-    return this.updateInvoice(id, { status: 'CANCELLED', cancelledAt: new Date() });
+    const to = assertTransition(invoice.status, 'CANCEL');
+    const updated = this.updateInvoice(id, { status: to, cancelledAt: new Date() });
+    if (updated) {
+      this.recordLifecycleEvent(id, 'INVOICE_CANCELLED', {
+        from: invoice.status,
+        to,
+        actor: sellerPublicKey,
+      });
+    }
+    return updated;
   }
 
   // Mark as paid
@@ -118,11 +144,15 @@ class MemoryStorage {
     this.markExpiredInvoices();
     const now = new Date();
     const invoice = this.invoices.get(id);
-    if (!invoice || invoice.status === 'PAID') return undefined;
+    if (!invoice) return undefined;
+    // PENDING settles on time, CANCELLED settles late; every other state
+    // (PAID, EXPIRED) is refused by the lifecycle, so a replay or a payment
+    // that lost the race to expiry is rejected the same way in every store.
+    const event: InvoiceEvent = invoice.status === 'CANCELLED' ? 'SETTLE_AFTER_CANCEL' : 'SETTLE';
+    const to = assertTransition(invoice.status, event);
     if (invoice.status === 'PENDING' && new Date(invoice.expiresAt).getTime() <= now.getTime()) {
-      return undefined;
+      throw new InvalidTransitionError('EXPIRED', to, event);
     }
-    if (invoice.status !== 'PENDING' && invoice.status !== 'CANCELLED') return undefined;
 
     const settlement = settlementFieldsForInvoice(
       invoice,
@@ -140,7 +170,7 @@ class MemoryStorage {
     if (decision.kind === 'replay') return undefined;
 
     const updated = this.updateInvoice(id, {
-      status: 'PAID',
+      status: to,
       paymentTxHash: txHash,
       payerPublicKey,
       payerName: payerInfo?.payerName,
@@ -191,7 +221,9 @@ class MemoryStorage {
 
     this.invoices.forEach((invoice) => {
       if (isPendingInvoiceExpired(invoice, now)) {
-        invoice.status = 'EXPIRED';
+        const from = invoice.status;
+        invoice.status = assertTransition(from, 'EXPIRE');
+        this.recordLifecycleEvent(invoice.id, 'INVOICE_EXPIRED', { from, to: invoice.status });
         count++;
       }
     });
@@ -216,6 +248,48 @@ class MemoryStorage {
     });
   }
 
+  /** Records a state change in the audit trail. */
+  private recordLifecycleEvent(invoiceId: string, eventType: string, eventData: any): void {
+    this.lifecycleEvents.push({
+      id: uuidv4(),
+      invoiceId,
+      eventType,
+      eventData,
+      createdAt: new Date(),
+    });
+  }
+
+  /**
+   * Read-only copies of every invoice. Unlike getAllInvoices this does not run
+   * the expiry sweep, so it never changes what a reconciliation reports on.
+   */
+  snapshotInvoices(): Invoice[] {
+    return Array.from(this.invoices.values()).map((invoice) => ({ ...invoice }));
+  }
+
+  /** Every state-change and payment event, oldest first. */
+  snapshotAuditEvents(): AuditEvent[] {
+    return [...this.lifecycleEvents, ...this.paymentEvents]
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map((event) => ({ ...event, eventData: event.eventData ?? null }));
+  }
+
+  /** Stats without the expiry sweep getStats applies. */
+  readStats(sellerPublicKey: string): InvoiceStats {
+    return calculateInvoiceStats(this.snapshotInvoices(), sellerPublicKey);
+  }
+
+  /**
+   * Full audit trail for one invoice: state changes and payment events in the
+   * order they happened. Matches what `payment_events` holds for Postgres.
+   */
+  getAuditTrail(invoiceId: string): AuditEvent[] {
+    return [...this.lifecycleEvents, ...this.paymentEvents]
+      .filter((event) => event.invoiceId === invoiceId)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map((event) => ({ ...event, eventData: event.eventData ?? null }));
+  }
+
   /**
    * Retrieves payment audit events, optionally filtered by invoice ID.
    */
@@ -232,6 +306,7 @@ class MemoryStorage {
     this.invoicesByMemo.clear();
     this.paymentClaims.clear();
     this.paymentEvents = [];
+    this.lifecycleEvents = [];
     console.log('🗑️ Memory storage cleared');
   }
 

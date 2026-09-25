@@ -287,6 +287,7 @@ export default function PaymentPage() {
                         </div>
                       )}
                       {!(isWrongNetwork && walletPaymentGate.ready) && (
+                      <>
                       <PaymentButton
                         destination={invoice.sellerPublicKey}
                         amount={String(invoice.amount)}
@@ -314,6 +315,8 @@ export default function PaymentPage() {
                             Return to mobile guidance
                           </button>
                         </div>
+                      )}
+                      </>
                       )}
                     </section>
                   )}

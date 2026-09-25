@@ -23,6 +23,7 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { walletAuth } from './fixtures/auth.fixture.ts';
 import type { AddressInfo } from 'node:net';
 import type { Application } from 'express';
 
@@ -152,6 +153,7 @@ async function createInvoice(port: number, amount = 25) {
     },
     {
       'x-forwarded-for': `203.0.113.${++createRequestSequence}`,
+      ...walletAuth(SELLER),
     }
   );
 
@@ -360,7 +362,9 @@ describe('invoice payment loop', () => {
     const stats = await jsonRequest(
       port,
       'GET',
-      `/api/invoices/stats?sellerPublicKey=${SELLER}`
+      `/api/invoices/stats?sellerPublicKey=${SELLER}`,
+      undefined,
+      walletAuth(SELLER)
     );
 
     assert.equal(stats.status, 200);
