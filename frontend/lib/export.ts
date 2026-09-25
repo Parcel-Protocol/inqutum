@@ -4,19 +4,16 @@ import {
   canExportPaymentProof,
 } from './payment-proof-policy.js';
 
+import {
+  PRINT_DOCUMENT_CSP,
+  buildMailtoUrl,
+  csvCell,
+  escapeHtml,
+} from './safe-content.js';
+
 export { assertPaymentProofAvailable, canExportPaymentProof };
 
-const HTML_ESCAPE_CHARACTERS: Record<string, string> = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&#039;',
-};
-
-export function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => HTML_ESCAPE_CHARACTERS[character]);
-}
+export { escapeHtml };
 
 interface Invoice {
   id: string;
@@ -81,7 +78,7 @@ export function generateInvoiceCSV(invoices: Invoice[]): string {
 
   const csvContent = [
     headers.join(','),
-    ...rows.map((row) => row.map((cell) => `"${cell}"`).join(',')),
+    ...rows.map((row) => row.map(csvCell).join(',')),
   ].join('\n');
 
   return csvContent;
@@ -114,6 +111,7 @@ export function generateInvoicePDF(invoice: Invoice): string {
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="${PRINT_DOCUMENT_CSP}">
   <title>Invoice ${escapeHtml(invoice.id)}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -350,7 +348,8 @@ export function generateInvoicePDF(invoice: Invoice): string {
 export function openInvoicePDF(invoice: Invoice) {
   const pdfContent = generateInvoicePDF(invoice);
   
-  // Open in new window for PDF printing
+  // Open in new window for PDF printing. It is our own blank document (the handle
+  // is needed to write into it), so noopener is not used; the document's CSP blocks scripts.
   const printWindow = window.open('', '_blank', 'width=800,height=600');
   if (printWindow) {
     printWindow.document.write(pdfContent);
@@ -394,6 +393,9 @@ export function shareInvoiceByEmail(invoice: Invoice) {
   
   body += `\nPowered by Quittance`;
   
-  const mailtoLink = `mailto:${invoice.customerEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const mailtoLink = buildMailtoUrl(invoice.customerEmail, subject, body);
+  if (!mailtoLink) {
+    throw new Error('Client email address is not valid');
+  }
   window.location.href = mailtoLink;
 }
