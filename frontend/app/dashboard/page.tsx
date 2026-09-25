@@ -124,13 +124,14 @@ export default function DashboardPage() {
             )}
             <Link href="/" className="btn btn-primary flex items-center gap-2">
               <Plus className="w-5 h-5" />
-              <span className="hidden sm:inline">New Invoice</span>
+              <span className="sr-only sm:not-sr-only">New Invoice</span>
             </Link>
           </div>
         </div>
       </header>
 
-      <div className="pt-20">
+      <main id="main-content" className="pt-20">
+        <h1 className="sr-only">Invoice dashboard</h1>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 relative z-10">
         {!connected || !publicKey ? (
           <div className="card text-center py-16 max-w-lg mx-auto">
@@ -240,7 +241,8 @@ export default function DashboardPage() {
             <div className="flex gap-3 mb-4">
               <div className="card flex-1 mb-0">
                 <input
-                  type="text"
+                  type="search"
+                  aria-label="Search invoices"
                   placeholder="Search invoices..."
                   className="input w-full"
                   value={searchQuery}
@@ -254,18 +256,20 @@ export default function DashboardPage() {
                 title="Export paid invoices only"
               >
                 <Download className="w-5 h-5" />
-                <span className="hidden sm:inline">Export CSV</span>
+                <span className="sr-only sm:not-sr-only">Export CSV</span>
               </button>
             </div>
 
-            <div className="bg-white rounded-lg border border-gray-200 mb-6 p-2 flex gap-2 flex-wrap">
+            <div role="group" aria-label="Filter by status" className="bg-white rounded-lg border border-gray-200 mb-6 p-2 flex gap-2 flex-wrap">
               {['all', 'pending', 'paid', 'expired', 'cancelled'].map((status) => (
                 <button
                   key={status}
+                  type="button"
                   onClick={() => setFilter(status)}
+                  aria-pressed={filter === status}
                   className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
                     filter === status
-                      ? 'bg-cyan-500 text-white'
+                      ? 'bg-[var(--teal)] text-white'
                       : 'text-gray-600 hover:bg-gray-100'
                   }`}
                 >
@@ -342,7 +346,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      </div>
+      </main>
     </div>
   );
 }
