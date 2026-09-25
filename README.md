@@ -369,7 +369,7 @@ issue a credit asset coded `USDC`, or even `XLM`. How invoices name assets and
 how settlement compares them is documented in
 [`docs/ASSETS.md`](./docs/ASSETS.md) and [`docs/VERIFY.md`](./docs/VERIFY.md).
 Background jobs (retries, dead-letter queue, running workers): [`docs/JOBS.md`](./docs/JOBS.md).
-Maintainer health report (dead jobs, stale work, drift, server errors): [`docs/OPS_HEALTH.md`](./docs/OPS_HEALTH.md).
+Feature flags, staged rollout and rollback: [`docs/FEATURE_FLAGS.md`](./docs/FEATURE_FLAGS.md).
 Notifications: [`docs/NOTIFICATIONS.md`](./docs/NOTIFICATIONS.md). Data exports: [`docs/EXPORTS.md`](./docs/EXPORTS.md). Untrusted content and URL handling: [`docs/CONTENT_SAFETY.md`](./docs/CONTENT_SAFETY.md).
 
 ## Tests & CI
