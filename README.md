@@ -250,7 +250,7 @@ npm run dev          # src/server.ts (Postgres) instead of dev:mvp (in-memory)
 ```
 
 The dashboard sends the connected wallet on every call:
-`GET /api/invoices?sellerPublicKey=G...` and `GET /api/invoices/stats?sellerPublicKey=G...`
+`GET /api/invoices?sellerPublicKey=G...` (cursor-paginated, see [`docs/PAGINATION.md`](./docs/PAGINATION.md)) and `GET /api/invoices/stats?sellerPublicKey=G...`
 both return `400` when the seller key is missing.
 
 ### 4) Tests

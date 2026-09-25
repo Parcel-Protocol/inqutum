@@ -1,5 +1,6 @@
 import { InvoiceMemoryService } from '../services/invoice-memory.service';
 import { CreateInvoiceInput } from '../utils/validation';
+import type { InvoiceCursor } from './invoice-cursor';
 import type { InvoiceStats } from './invoice-stats';
 import type { InvoiceStorage, OverduePendingInvoices, PayerInfo, StoredInvoice } from './invoice-storage';
 import { auditStore, AuditEvent, AuditFilter, AuditQueryResult } from '../audit/audit-service';
@@ -22,9 +23,10 @@ export class MemoryInvoiceStorage implements InvoiceStorage {
     sellerPublicKey: string,
     status?: string,
     limit = 50,
-    offset = 0
+    offset = 0,
+    after?: InvoiceCursor
   ): Promise<StoredInvoice[]> {
-    return this.service.getInvoicesBySeller(sellerPublicKey, status, limit, offset);
+    return this.service.getInvoicesBySeller(sellerPublicKey, status, limit, offset, after);
   }
 
   async cancelInvoice(id: string): Promise<StoredInvoice> {

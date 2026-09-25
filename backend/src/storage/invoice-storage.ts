@@ -9,7 +9,10 @@ import type { AuditEvent, AuditFilter, AuditQueryResult } from '../audit/audit-s
 // PENDING->PAID only when expiresAt still in the future, lazy
 // markExpiredInvoices on all reads, strict seller_public_key scoping on list
 // and stats, and audit trail capture) is pinned by the shared test suite in invoice-handlers.test.ts.
+import type { InvoiceCursor } from './invoice-cursor';
+
 export type InvoiceStatus = 'PENDING' | 'PAID' | 'EXPIRED' | 'CANCELLED';
+export const INVOICE_STATUSES: readonly InvoiceStatus[] = ['PENDING', 'PAID', 'EXPIRED', 'CANCELLED'];
 
 // Invoice shape shared by both storage backends.
 export interface StoredInvoice {
@@ -59,11 +62,16 @@ export interface InvoiceStorage {
 
   createInvoice(input: CreateInvoiceInput): Promise<StoredInvoice>;
   getInvoiceById(id: string): Promise<StoredInvoice | null>;
+  /**
+   * Newest first by (createdAt, id). Pass `after` for keyset pagination;
+   * `offset` is kept for older clients and is unstable under inserts.
+   */
   getInvoicesBySeller(
     sellerPublicKey: string,
     status?: string,
     limit?: number,
-    offset?: number
+    offset?: number,
+    after?: InvoiceCursor
   ): Promise<StoredInvoice[]>;
   cancelInvoice(id: string): Promise<StoredInvoice>;
   markAsPaid(
