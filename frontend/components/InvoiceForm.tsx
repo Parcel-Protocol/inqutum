@@ -7,6 +7,18 @@ import { Loader2 } from 'lucide-react';
 import { STELLAR_ASSETS, getAssetByCode } from '@/lib/assets';
 import AssetLogo from './AssetLogo';
 import ApiErrorState from './ApiErrorState';
+import {
+  firstInvalidField,
+  validateInvoiceForm,
+  type InvoiceFormErrors,
+  type InvoiceFormField,
+} from '@/lib/invoice-form-validation';
+
+const FIELD_IDS: Record<InvoiceFormField, string> = {
+  amount: 'invoice-amount',
+  sellerEmail: 'invoice-seller-email',
+  customerEmail: 'invoice-customer-email',
+};
 
 interface InvoiceFormProps {
   onSuccess?: (invoice: any) => void;
@@ -24,6 +36,26 @@ export default function InvoiceForm({ onSuccess, userWallet }: InvoiceFormProps)
   const [customerEmail, setCustomerEmail] = useState('');
   const [apiError, setApiError] = useState<string | null>(null);
   const [expiresInDays, setExpiresInDays] = useState(7);
+  const [errors, setErrors] = useState<InvoiceFormErrors>({});
+
+  /** aria wiring for a validated field: marks it invalid and links its error text. */
+  const errorProps = (field: InvoiceFormField, hintId?: string) => {
+    const describedBy = [errors[field] ? `${FIELD_IDS[field]}-error` : null, hintId]
+      .filter(Boolean)
+      .join(' ');
+    return {
+      id: FIELD_IDS[field],
+      'aria-invalid': Boolean(errors[field]),
+      'aria-describedby': describedBy || undefined,
+    };
+  };
+
+  const fieldError = (field: InvoiceFormField) =>
+    errors[field] ? (
+      <p id={`${FIELD_IDS[field]}-error`} className="field-error">
+        {errors[field]}
+      </p>
+    ) : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,18 +65,12 @@ export default function InvoiceForm({ onSuccess, userWallet }: InvoiceFormProps)
       return;
     }
 
-    if (!amount || parseFloat(amount) <= 0) {
-      toast.error('Enter a valid amount');
-      return;
-    }
-
-    if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
-      toast.error('Enter a valid client email');
-      return;
-    }
-
-    if (sellerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sellerEmail)) {
-      toast.error('Enter a valid email for yourself');
+    const nextErrors = validateInvoiceForm({ amount, sellerEmail, customerEmail });
+    setErrors(nextErrors);
+    const invalid = firstInvalidField(nextErrors);
+    if (invalid) {
+      // Move focus to the first problem so keyboard and screen reader users land on it.
+      document.getElementById(FIELD_IDS[invalid])?.focus();
       return;
     }
 
@@ -85,10 +111,10 @@ export default function InvoiceForm({ onSuccess, userWallet }: InvoiceFormProps)
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4" noValidate>
       {apiError && <ApiErrorState message={apiError} compact />}
       <div>
-        <label className="label">Invoice Amount *</label>
+        <label className="label" htmlFor={FIELD_IDS.amount}>Invoice Amount *</label>
         <div className="flex gap-3 flex-col sm:flex-row">
           <input
             type="number"
@@ -96,12 +122,14 @@ export default function InvoiceForm({ onSuccess, userWallet }: InvoiceFormProps)
             min="0.0000001"
             required
             className="input flex-1 text-2xl font-semibold"
+            {...errorProps('amount')}
             placeholder="10.00"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
           <div className="relative">
             <select
+              aria-label="Asset"
               value={assetCode}
               onChange={(e) => setAssetCode(e.target.value)}
               className="input w-full sm:w-40 text-sm font-semibold pl-12 pr-3 appearance-none cursor-pointer"
@@ -117,11 +145,13 @@ export default function InvoiceForm({ onSuccess, userWallet }: InvoiceFormProps)
             </div>
           </div>
         </div>
+        {fieldError('amount')}
       </div>
 
       <div>
-        <label className="label">Description</label>
+        <label className="label" htmlFor="invoice-description">Description</label>
         <textarea
+          id="invoice-description"
           className="input min-h-[80px] resize-none text-sm"
           placeholder="What is this invoice for?"
           value={description}
@@ -134,6 +164,7 @@ export default function InvoiceForm({ onSuccess, userWallet }: InvoiceFormProps)
         <label className="label" htmlFor="invoice-expiry">Payment window</label>
         <select
           id="invoice-expiry"
+          aria-describedby="invoice-expiry-hint"
           className="input w-full text-sm"
           value={expiresInDays}
           onChange={(event) => setExpiresInDays(Number(event.target.value))}
@@ -144,15 +175,16 @@ export default function InvoiceForm({ onSuccess, userWallet }: InvoiceFormProps)
             </option>
           ))}
         </select>
-        <p className="text-xs text-gray-500 mt-1">
+        <p id="invoice-expiry-hint" className="text-xs text-gray-500 mt-1">
           After this window the invoice stays in history but cannot be paid or verified.
         </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="label">Your name (optional)</label>
+          <label className="label" htmlFor="invoice-seller-name">Your name (optional)</label>
           <input
+            id="invoice-seller-name"
             type="text"
             className="input text-sm"
             placeholder="Your name or business"
@@ -163,21 +195,24 @@ export default function InvoiceForm({ onSuccess, userWallet }: InvoiceFormProps)
         </div>
 
         <div>
-          <label className="label">Your email (optional)</label>
+          <label className="label" htmlFor={FIELD_IDS.sellerEmail}>Your email (optional)</label>
           <input
             type="email"
             className="input text-sm"
+            {...errorProps('sellerEmail')}
             placeholder="you@example.com"
             value={sellerEmail}
             onChange={(e) => setSellerEmail(e.target.value)}
             maxLength={255}
           />
+          {fieldError('sellerEmail')}
         </div>
       </div>
 
       <div>
-        <label className="label">Client name (optional)</label>
+        <label className="label" htmlFor="invoice-customer-name">Client name (optional)</label>
         <input
+          id="invoice-customer-name"
           type="text"
           className="input text-sm"
           placeholder="Client or company name"
@@ -188,16 +223,18 @@ export default function InvoiceForm({ onSuccess, userWallet }: InvoiceFormProps)
       </div>
 
       <div>
-        <label className="label">Client email (optional)</label>
+        <label className="label" htmlFor={FIELD_IDS.customerEmail}>Client email (optional)</label>
         <input
           type="email"
           className="input text-sm"
+          {...errorProps('customerEmail', 'invoice-customer-email-hint')}
           placeholder="client@example.com — for sending the invoice"
           value={customerEmail}
           onChange={(e) => setCustomerEmail(e.target.value)}
           maxLength={255}
         />
-        <p className="text-xs text-gray-500 mt-1">
+        {fieldError('customerEmail')}
+        <p id="invoice-customer-email-hint" className="text-xs text-gray-500 mt-1">
           Used only to send the invoice or payment proof. Not required to create an invoice.
         </p>
       </div>
@@ -205,11 +242,12 @@ export default function InvoiceForm({ onSuccess, userWallet }: InvoiceFormProps)
       <button
         type="submit"
         disabled={loading}
+        aria-busy={loading}
         className="btn btn-primary w-full flex items-center justify-center gap-2 mt-6"
       >
         {loading ? (
           <>
-            <Loader2 className="w-5 h-5 animate-spin" />
+            <Loader2 className="w-5 h-5 animate-spin" aria-hidden />
             Creating...
           </>
         ) : (

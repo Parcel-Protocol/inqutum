@@ -48,6 +48,8 @@ export default function HomePage() {
         </div>
       </header>
 
+      <main id="main-content">
+
       {/* Hero — one composition */}
       <section className="relative min-h-[100svh] flex flex-col justify-center hero-atmosphere overflow-hidden">
         <div className="hero-grain" aria-hidden />
@@ -57,9 +59,9 @@ export default function HomePage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
           >
-            <p className="font-display text-[clamp(3.5rem,12vw,8.5rem)] leading-[0.9] tracking-tight text-[var(--ink)] max-w-4xl">
+            <h1 className="font-display text-[clamp(3.5rem,12vw,8.5rem)] leading-[0.9] tracking-tight text-[var(--ink)] max-w-4xl">
               Quittance
-            </p>
+            </h1>
           </motion.div>
 
           <motion.p
@@ -257,6 +259,8 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      </main>
 
       <footer className="border-t border-[var(--line)] bg-white">
         <div className="max-w-6xl mx-auto px-5 sm:px-8 py-12 flex flex-col sm:flex-row sm:items-end justify-between gap-8">

@@ -186,12 +186,12 @@ export default function WalletConnect({ onConnect }: WalletConnectProps = {}) {
       {loading ? (
         <>
           <Loader2 className="w-5 h-5 animate-spin" />
-          <span className="hidden sm:inline">Connecting...</span>
+          <span className="sr-only sm:not-sr-only">Connecting...</span>
         </>
       ) : (
         <>
           <Wallet className="w-5 h-5" />
-          <span className="hidden sm:inline">Connect Wallet</span>
+          <span className="sr-only sm:not-sr-only">Connect Wallet</span>
         </>
       )}
     </button>

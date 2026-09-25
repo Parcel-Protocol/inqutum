@@ -43,7 +43,7 @@ export default function PaymentPage() {
     }
     return (
       <PageMessage>
-        <h2 className="text-2xl font-bold text-red-600">Invoice Not Found</h2>
+        <h1 className="text-2xl font-bold text-red-600">Invoice Not Found</h1>
       </PageMessage>
     );
   }
@@ -63,7 +63,7 @@ export default function PaymentPage() {
   };
 
   return (
-    <main className="min-h-screen bg-logo-pattern relative py-8 sm:py-12 px-4">
+    <main id="main-content" className="min-h-screen bg-logo-pattern relative py-8 sm:py-12 px-4">
       <PayPageHeader
         wallet={page.wallet}
         onConnect={page.setWallet}

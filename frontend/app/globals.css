@@ -32,8 +32,9 @@ body {
     @apply focus-visible:outline-none;
   }
 
+  /* Solid teal ring: the old 40% alpha ring fell below the 3:1 non-text contrast minimum. */
   *:focus-visible {
-    box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px rgba(15, 118, 110, 0.4);
+    box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--teal);
   }
 }
 
@@ -89,7 +90,21 @@ body {
   .input:focus {
     outline: none;
     border-color: var(--teal);
-    box-shadow: 0 0 0 1px rgba(15, 118, 110, 0.3);
+    box-shadow: 0 0 0 1px var(--teal);
+  }
+
+  .input[aria-invalid='true'] {
+    border-color: #b91c1c;
+  }
+
+  .field-error {
+    @apply mt-1 text-sm;
+    color: #b91c1c;
+  }
+
+  .skip-link {
+    @apply sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100] focus:px-4 focus:py-2 focus:rounded-md focus:bg-white;
+    color: var(--ink);
   }
 
   .label {
