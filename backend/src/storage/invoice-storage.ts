@@ -4,6 +4,10 @@ import type {
   SettlementContext,
 } from '../domain/invoice-settlement';
 import type { InvoiceStats } from './invoice-stats';
+import type {
+  ReconciliationInvoice,
+  ReconciliationSettlement,
+} from '../domain/reconciliation';
 
 // Shared shape and shared storage contract. Both MemoryInvoiceStorage and
 // PostgresInvoiceStorage implement these 8 methods with the same semantics,
@@ -105,4 +109,19 @@ export interface InvoiceStorage {
   countInvoices?(): Promise<number>;
   /** Audit events for one invoice, oldest first. */
   getAuditTrail(invoiceId: string): Promise<AuditEvent[]>;
+
+  // --- Read-only access for reconciliation (docs/RECONCILIATION.md) ---
+  //
+  // Every other read here applies the expiry sweep first, which *writes*. These
+  // never write: a reconciliation that changed the data it is checking could
+  // not report stale records, and could not be run against production safely.
+
+  /** Every invoice exactly as stored, with amounts kept exact. */
+  listInvoicesForReconciliation(): Promise<ReconciliationInvoice[]>;
+  /** Every audit event, oldest first. */
+  listAuditEvents(): Promise<AuditEvent[]>;
+  /** Same figures as getInvoiceStats, without the expiry sweep. */
+  readInvoiceStats(sellerPublicKey: string): Promise<InvoiceStats[]>;
+  /** Settlement references held apart from the invoice rows, or null if this backend keeps none. */
+  listSettlements(): Promise<ReconciliationSettlement[] | null>;
 }

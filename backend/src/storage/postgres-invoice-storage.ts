@@ -1,6 +1,7 @@
 import invoiceService, { InvoiceService } from '../services/invoice.service';
 import { CreateInvoiceInput } from '../utils/validation';
 import type { InvoiceStats } from './invoice-stats';
+import type { ReconciliationInvoice, ReconciliationSettlement } from '../domain/reconciliation';
 import type {
   AuditEvent,
   InvoiceStorage,
@@ -66,6 +67,22 @@ export class PostgresInvoiceStorage implements InvoiceStorage {
 
   async getAuditTrail(invoiceId: string): Promise<AuditEvent[]> {
     return this.service.getAuditTrail(invoiceId);
+  }
+
+  async listInvoicesForReconciliation(): Promise<ReconciliationInvoice[]> {
+    return this.service.listInvoicesForReconciliation();
+  }
+
+  async listAuditEvents(): Promise<AuditEvent[]> {
+    return this.service.listAuditEvents();
+  }
+
+  async readInvoiceStats(sellerPublicKey: string): Promise<InvoiceStats[]> {
+    return this.service.readInvoiceStats(sellerPublicKey);
+  }
+
+  async listSettlements(): Promise<ReconciliationSettlement[] | null> {
+    return this.service.listSettlements();
   }
 
   async countInvoices(): Promise<number> {

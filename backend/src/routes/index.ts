@@ -7,6 +7,7 @@ import { createPaymentMonitorRouter } from './payment-monitor.routes';
 import { healthHandler, readinessHandler } from '../health';
 import { PostgresIdempotencyStore } from '../idempotency/postgres-store';
 import { createAuthRouter } from './auth.routes';
+import { createReconciliationRouter } from './reconciliation.routes';
 import { authenticate, requirePermission } from '../middleware/access-control';
 
 const router = Router();
@@ -25,6 +26,9 @@ router.use(
 
 // Wallet sign-in and role introspection
 router.use(createAuthRouter());
+
+// Read-only reconciliation dry run (operators and services only)
+router.use(createReconciliationRouter({ storage: postgresInvoiceStorage }));
 
 // Stellar routes. These proxy Horizon on the server's quota, so they need a
 // signed-in caller rather than being an open relay.

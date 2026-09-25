@@ -20,6 +20,7 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "cutover": "tsx scripts/cutover.ts",
+    "reconcile": "tsx scripts/reconcile.ts",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

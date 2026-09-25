@@ -6,6 +6,7 @@ import memoryStorage, { MemoryStorage, MemoryPaymentEvent } from '../storage/mem
 import { calculateInvoiceExpiry } from '../domain/invoice-expiry';
 import type { AuditEvent, StoredInvoice } from '../storage/invoice-storage';
 import type { InvoiceStats } from '../storage/invoice-stats';
+import type { ReconciliationInvoice } from '../domain/reconciliation';
 import type { MarkAsPaidOptions, PayerInfo } from '../storage/invoice-storage';
 
 /**
@@ -132,6 +133,18 @@ export class InvoiceMemoryService {
 
   async getAuditTrail(invoiceId: string): Promise<AuditEvent[]> {
     return this.storage.getAuditTrail(invoiceId);
+  }
+
+  async listInvoicesForReconciliation(): Promise<ReconciliationInvoice[]> {
+    return this.storage.snapshotInvoices();
+  }
+
+  async listAuditEvents(): Promise<AuditEvent[]> {
+    return this.storage.snapshotAuditEvents();
+  }
+
+  async readInvoiceStats(sellerPublicKey: string): Promise<InvoiceStats[]> {
+    return [this.storage.readStats(sellerPublicKey)];
   }
 
   async getPaymentEvents(invoiceId?: string): Promise<MemoryPaymentEvent[]> {

@@ -16,6 +16,7 @@ import {
   type InvoiceStatus,
 } from '../../../shared/invoice-lifecycle';
 import type { AuditEvent, MarkAsPaidOptions } from '../storage/invoice-storage';
+import type { ReconciliationInvoice, ReconciliationSettlement } from '../domain/reconciliation';
 
 // PostgreSQL invoice service. Kept behaviourally identical to
 // InvoiceMemoryService so callers that go through the shared InvoiceStorage
@@ -365,6 +366,70 @@ export class InvoiceService {
   }
 
   /**
+   * Every invoice as stored, for reconciliation. Read-only: no expiry sweep, and
+   * amounts stay as the exact decimal strings Postgres returns rather than being
+   * rounded through a float.
+   */
+  async listInvoicesForReconciliation(): Promise<ReconciliationInvoice[]> {
+    const result = await this.db.query('SELECT * FROM invoices ORDER BY created_at ASC, id ASC');
+    return result.rows.map((row) => ({
+      id: row.id,
+      sellerPublicKey: row.seller_public_key,
+      amount: String(row.amount),
+      assetCode: row.asset_code ?? undefined,
+      assetIssuer: row.asset_issuer ?? undefined,
+      memo: row.memo,
+      status: row.status,
+      paymentTxHash: row.payment_tx_hash,
+      payerPublicKey: row.payer_public_key,
+      paidAt: row.paid_at,
+      cancelledAt: row.cancelled_at,
+      settledAt: row.settled_at,
+      settlementContext: row.settlement_context,
+      priorStatus: row.prior_status,
+      expiresAt: row.expires_at,
+    }));
+  }
+
+  /** Every audit event, oldest first. Read-only. */
+  async listAuditEvents(): Promise<AuditEvent[]> {
+    const result = await this.db.query(
+      `SELECT id, invoice_id, event_type, event_data, created_at
+       FROM payment_events
+       ORDER BY created_at ASC, id ASC`
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      invoiceId: row.invoice_id,
+      eventType: row.event_type,
+      eventData: row.event_data ?? null,
+      createdAt: row.created_at,
+    }));
+  }
+
+  /**
+   * Payments the monitor recorded in `transactions`, as settlement references.
+   * Read-only. Not every settled invoice has one (the verify endpoint does not
+   * write here), which is why a missing row is reported as a warning.
+   */
+  async listSettlements(): Promise<ReconciliationSettlement[]> {
+    const result = await this.db.query(
+      `SELECT tx_hash, invoice_id, to_address, amount, asset_code, asset_issuer, memo
+       FROM transactions
+       ORDER BY processed_at ASC, tx_hash ASC`
+    );
+    return result.rows.map((row) => ({
+      txHash: row.tx_hash,
+      invoiceId: row.invoice_id,
+      destination: row.to_address,
+      amount: String(row.amount),
+      assetCode: row.asset_code,
+      assetIssuer: row.asset_issuer,
+      memo: row.memo,
+    }));
+  }
+
+  /**
    * Audit trail for one invoice, oldest first.
    */
   async getAuditTrail(invoiceId: string): Promise<AuditEvent[]> {
@@ -393,6 +458,16 @@ export class InvoiceService {
     }
 
     await this.markExpiredInvoices();
+    return this.readInvoiceStats(sellerPublicKey);
+  }
+
+  /**
+   * Statistics without the expiry sweep, so reading them never writes.
+   */
+  async readInvoiceStats(sellerPublicKey: string): Promise<InvoiceStats[]> {
+    if (!sellerPublicKey) {
+      throw new Error('Seller public key is required');
+    }
 
     const query = `
       SELECT 

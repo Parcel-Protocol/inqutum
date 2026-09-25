@@ -260,6 +260,26 @@ class MemoryStorage {
   }
 
   /**
+   * Read-only copies of every invoice. Unlike getAllInvoices this does not run
+   * the expiry sweep, so it never changes what a reconciliation reports on.
+   */
+  snapshotInvoices(): Invoice[] {
+    return Array.from(this.invoices.values()).map((invoice) => ({ ...invoice }));
+  }
+
+  /** Every state-change and payment event, oldest first. */
+  snapshotAuditEvents(): AuditEvent[] {
+    return [...this.lifecycleEvents, ...this.paymentEvents]
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map((event) => ({ ...event, eventData: event.eventData ?? null }));
+  }
+
+  /** Stats without the expiry sweep getStats applies. */
+  readStats(sellerPublicKey: string): InvoiceStats {
+    return calculateInvoiceStats(this.snapshotInvoices(), sellerPublicKey);
+  }
+
+  /**
    * Full audit trail for one invoice: state changes and payment events in the
    * order they happened. Matches what `payment_events` holds for Postgres.
    */
