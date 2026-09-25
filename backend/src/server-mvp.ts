@@ -8,10 +8,13 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { createInvoiceRouter } from './routes/invoice.routes';
 import { createAuditRouter } from './routes/audit.routes';
+import { createExportRouter } from './routes/export.routes';
+import { createNotificationRouter } from './routes/notification.routes';
 import { createObservabilityRouter } from './routes/observability.routes';
 import memoryInvoiceStorage from './storage/memory-invoice-storage';
 import { configuredFrontendOrigins, corsOptions } from './config/runtime';
 import { healthHandler, readinessHandler } from './health';
+import { securityHeaders } from './security/content-safety';
 import { correlationMiddleware } from './observability/telemetry';
 import { buildUserSafeErrorResponse, classifyError } from './errors/error-taxonomy';
 
@@ -23,6 +26,9 @@ const PORT = process.env.PORT || 3001;
 
 // Correlation ID & Latency Tracking
 app.use(correlationMiddleware());
+
+// Restrictive security headers on every API response
+app.use(securityHeaders());
 
 // Middleware
 app.use(cors(corsOptions()));
@@ -55,6 +61,8 @@ app.get('/api/ready', readinessHandler(memoryInvoiceStorage.mode));
 app.use('/api', createInvoiceRouter({ storage: memoryInvoiceStorage }));
 app.use('/api', createAuditRouter({ storage: memoryInvoiceStorage }));
 app.use('/api', createObservabilityRouter({ storage: memoryInvoiceStorage }));
+app.use('/api', createNotificationRouter());
+app.use('/api', createExportRouter({ storage: memoryInvoiceStorage }));
 
 // Mock Stellar endpoint (MVP only)
 app.get('/api/stellar/account', (req: Request, res: Response) => {

@@ -7,6 +7,7 @@ import {
   setAllowed,
 } from '@stellar/freighter-api';
 import { detectFreighter } from './freighter-availability';
+import { explorerTransactionUrl } from './safe-content.js';
 
 // Network configuration
 const STELLAR_NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK || 'TESTNET';
@@ -23,10 +24,9 @@ export const NETWORK_PASSPHRASE =
 
 export const server = new StellarSdk.Horizon.Server(HORIZON_URL);
 
-export const getExplorerTransactionUrl = (txHash: string): string => {
-  const network = STELLAR_NETWORK === 'TESTNET' ? 'testnet' : 'public';
-  return `https://stellar.expert/explorer/${network}/tx/${encodeURIComponent(txHash)}`;
-};
+// Malformed hashes fall back to the explorer home rather than building a link from untrusted text.
+export const getExplorerTransactionUrl = (txHash: string): string =>
+  explorerTransactionUrl(STELLAR_NETWORK, txHash);
 
 const getTrustlineMessage = (assetCode: string): string =>
   `Your wallet does not have a ${assetCode} trustline on ${STELLAR_NETWORK.toLowerCase()}. Add the ${assetCode} trustline in Freighter, or ask the seller for an XLM invoice.`;

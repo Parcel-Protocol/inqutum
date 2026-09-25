@@ -9,6 +9,7 @@ import {
   describeStellarNetworkError,
 } from '@/lib/stellar';
 import { useWalletStore } from '@/lib/store';
+import { EXTERNAL_WINDOW_FEATURES, explorerAccountUrl } from '@/lib/safe-content.js';
 import { paymentMonitor } from '@/lib/payment-monitor';
 import { Wallet, LogOut, Loader2, ExternalLink, Bell, BellOff } from 'lucide-react';
 import { toast } from 'sonner';
@@ -109,8 +110,11 @@ export default function WalletConnect({ onConnect }: WalletConnectProps = {}) {
   };
 
   const openExplorer = () => {
-    const network = process.env.NEXT_PUBLIC_STELLAR_NETWORK === 'TESTNET' ? 'testnet' : 'public';
-    window.open(`https://stellar.expert/explorer/${network}/account/${publicKey}`, '_blank');
+    window.open(
+      explorerAccountUrl(process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? '', publicKey),
+      '_blank',
+      EXTERNAL_WINDOW_FEATURES
+    );
   };
 
   if (connected && publicKey) {
