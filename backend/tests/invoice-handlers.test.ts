@@ -8,6 +8,7 @@ import { PostgresInvoiceStorage } from '../src/storage/postgres-invoice-storage.
 import { InvoiceService } from '../src/services/invoice.service.ts';
 import memoryStorage from '../src/storage/memory-storage.ts';
 import type { InvoiceStorage } from '../src/storage/invoice-storage.ts';
+import { compareNewestFirst } from '../src/storage/invoice-cursor.ts';
 
 const SELLER_A = 'G' + 'A'.repeat(55);
 const SELLER_B = 'G' + 'B'.repeat(55);
@@ -114,9 +115,14 @@ function createFakePostgres() {
       }
       const offset = params[params.length - 1];
       const limit = params[params.length - 2];
+      const key = (row: any) => ({ createdAt: row.created_at, id: row.id });
+      if (sql.includes(") < ($")) {
+        const cursor = { createdAt: new Date(params[params.length - 4]), id: params[params.length - 3] };
+        found = found.filter(row => compareNewestFirst(cursor, key(row)) < 0);
+      }
       const page = found
         .slice()
-        .sort((a, b) => b.created_at.getTime() - a.created_at.getTime())
+        .sort((a, b) => compareNewestFirst(key(a), key(b)))
         .slice(offset, offset + limit);
       return { rows: page.map(clone), rowCount: page.length };
     }
@@ -188,7 +194,11 @@ function createFakePostgres() {
     throw new Error(`Unhandled query in fake Postgres: ${sql}`);
   };
 
-  return { query, events };
+  const remove = (id: string) => {
+    rows.splice(rows.findIndex(row => row.id === id), 1);
+  };
+
+  return { query, events, remove };
 }
 
 function paymentTransaction(overrides: {
@@ -228,9 +238,16 @@ const USDC_ISSUER = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
 /**
  * Both storage backends must expose identical request/response behaviour.
  */
-function runSharedBackendSuite(name: string, createStorage: () => InvoiceStorage) {
+interface BackendUnderTest {
+  storage: InvoiceStorage;
+  /** Hard-deletes a row behind the API's back, as an operator or retention job would. */
+  removeInvoice(id: string): void;
+}
+
+function runSharedBackendSuite(name: string, createBackend: () => BackendUnderTest) {
   describe(`invoice handlers on ${name} storage`, () => {
     let storage: InvoiceStorage;
+    let removeInvoice: (id: string) => void;
     let transaction: any;
 
     const handlers = () =>
@@ -249,7 +266,7 @@ function runSharedBackendSuite(name: string, createStorage: () => InvoiceStorage
 
     beforeEach(() => {
       memoryStorage.clear();
-      storage = createStorage();
+      ({ storage, removeInvoice } = createBackend());
       transaction = undefined;
     });
 
@@ -541,7 +558,112 @@ function runSharedBackendSuite(name: string, createStorage: () => InvoiceStorage
       assert.equal(res.statusCode, 200);
       assert.equal(res.body.data.length, 1);
       assert.equal(res.body.data[0].sellerPublicKey, SELLER_A);
-      assert.deepEqual(res.body.pagination, { limit: 50, offset: 0, total: 1 });
+      assert.deepEqual(res.body.pagination, {
+        limit: 50,
+        offset: 0,
+        total: 1,
+        nextCursor: null,
+        hasMore: false,
+      });
+    });
+
+    describe('cursor pagination', () => {
+      const list = (query: Record<string, unknown>) =>
+        call(handlers().getInvoices, createReq({ query: { sellerPublicKey: SELLER_A, ...query } }));
+
+      /** Walks every page with `limit`, running `between` after each page. */
+      const collect = async (
+        limit: number,
+        query: Record<string, unknown> = {},
+        between: (page: number) => Promise<void> = async () => {}
+      ) => {
+        const seen: string[] = [];
+        let cursor: string | undefined;
+        for (let page = 0; page < 20; page++) {
+          const res = await list({ ...query, limit, cursor });
+          assert.equal(res.statusCode, 200);
+          seen.push(...res.body.data.map((inv: any) => inv.id));
+          assert.equal(res.body.pagination.hasMore, res.body.pagination.nextCursor !== null);
+          if (!res.body.pagination.hasMore) return seen;
+          cursor = res.body.pagination.nextCursor;
+          await between(page);
+        }
+        throw new Error('pagination did not terminate');
+      };
+
+      it('returns every invoice once in newest-first order, ties broken by id', async () => {
+        // Created back to back, so several share a millisecond timestamp.
+        for (let i = 0; i < 7; i++) await createInvoice({ amount: i + 1 });
+
+        const all = (await list({ limit: 100 })).body.data.map((inv: any) => inv.id);
+        assert.deepEqual(await collect(2), all);
+        assert.equal(new Set(all).size, 7);
+      });
+
+      it('does not duplicate or skip rows when invoices are created mid-pagination', async () => {
+        const before: string[] = [];
+        for (let i = 0; i < 5; i++) before.push((await createInvoice()).id);
+
+        const seen = await collect(2, {}, async () => {
+          await createInvoice();
+        });
+
+        // New invoices sort ahead of the cursor, so later pages hold exactly the old rows.
+        assert.deepEqual([...seen].sort(), [...before].sort());
+      });
+
+      it('does not skip rows when the cursor row itself is deleted', async () => {
+        for (let i = 0; i < 6; i++) await createInvoice();
+        const all = (await list({ limit: 100 })).body.data.map((inv: any) => inv.id);
+
+        const first = await list({ limit: 2 });
+        removeInvoice(all[1]); // the row the cursor points at
+        const second = await list({ limit: 4, cursor: first.body.pagination.nextCursor });
+
+        assert.deepEqual(second.body.data.map((inv: any) => inv.id), all.slice(2));
+      });
+
+      it('never returns other wallets\' invoices, even with a cursor taken from them', async () => {
+        for (let i = 0; i < 3; i++) {
+          await createInvoice();
+          await createInvoice({ sellerPublicKey: SELLER_B });
+        }
+        const seen = await collect(1);
+        assert.equal(seen.length, 3);
+
+        const other = await call(
+          handlers().getInvoices,
+          createReq({ query: { sellerPublicKey: SELLER_B, limit: 1 } })
+        );
+        const crossed = await list({ cursor: other.body.pagination.nextCursor });
+        assert.ok(crossed.body.data.every((inv: any) => inv.sellerPublicKey === SELLER_A));
+      });
+
+      it('keeps status-filtered pages stable when a record leaves the filter', async () => {
+        const ids: string[] = [];
+        for (let i = 0; i < 4; i++) ids.push((await createInvoice()).id);
+
+        const first = await list({ status: 'pending', limit: 2 });
+        assert.equal(first.statusCode, 200);
+        // Cancel an invoice already shown; offset paging would now skip a row.
+        await call(handlers().cancelInvoice, createReq({ params: { id: first.body.data[0].id } }));
+        const second = await list({ status: 'PENDING', limit: 2, cursor: first.body.pagination.nextCursor });
+
+        const seen = [...first.body.data, ...second.body.data].map((inv: any) => inv.id);
+        assert.deepEqual([...seen].sort(), [...ids].sort());
+      });
+
+      it('rejects unknown statuses and tampered cursors', async () => {
+        const status = await list({ status: 'archived' });
+        assert.equal(status.statusCode, 400);
+        assert.equal(status.body.code, 'INVALID_STATUS');
+
+        for (const cursor of ['garbage', Buffer.from('2026-01-01T00:00:00Z|1 OR 1=1').toString('base64url')]) {
+          const res = await list({ cursor });
+          assert.equal(res.statusCode, 400);
+          assert.equal(res.body.code, 'INVALID_CURSOR');
+        }
+      });
     });
 
     it('requires a wallet when listing invoices', async () => {
@@ -612,11 +734,17 @@ function runSharedBackendSuite(name: string, createStorage: () => InvoiceStorage
   });
 }
 
-runSharedBackendSuite('in-memory', () => new MemoryInvoiceStorage());
-runSharedBackendSuite(
-  'postgres',
-  () => new PostgresInvoiceStorage(new InvoiceService(createFakePostgres()))
-);
+runSharedBackendSuite('in-memory', () => ({
+  storage: new MemoryInvoiceStorage(),
+  removeInvoice: id => (memoryStorage as any).invoices.delete(id),
+}));
+runSharedBackendSuite('postgres', () => {
+  const db = createFakePostgres();
+  return {
+    storage: new PostgresInvoiceStorage(new InvoiceService(db)),
+    removeInvoice: db.remove,
+  };
+});
 
 describe('storage adapters', () => {
   it('report the backend they are wired to', () => {

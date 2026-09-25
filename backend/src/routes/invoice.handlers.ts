@@ -10,7 +10,8 @@ import stellarService from '../services/stellar.service';
 import { createInvoiceSchema } from '../utils/validation';
 import { generatePaymentQR, generateStellarPaymentQR } from '../utils/qrcode';
 import { sendFailure, sendSuccess, sendVerificationFailure } from '../types/api';
-import type { InvoiceStorage, StoredInvoice } from '../storage/invoice-storage';
+import { INVOICE_STATUSES, type InvoiceStatus, type InvoiceStorage, type StoredInvoice } from '../storage/invoice-storage';
+import { decodeInvoiceCursor, encodeInvoiceCursor } from '../storage/invoice-cursor';
 import { STELLAR_NETWORK } from '../config/stellar';
 import {
   VERIFICATION_MESSAGES,
@@ -288,7 +289,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
       const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
 
       try {
-        const { status, sellerPublicKey } = req.query;
+        const { sellerPublicKey } = req.query;
 
         if (!sellerPublicKey) {
           const duration = performance.now() - start;
@@ -307,15 +308,44 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           });
         }
 
-        const limit = toPositiveInt(req.query.limit, 50);
-        const offset = toPositiveInt(req.query.offset, 0);
+        // Status is matched case-insensitively so API and UI filters agree on both backends.
+        const status = req.query.status ? String(req.query.status).toUpperCase() : undefined;
+        const after = req.query.cursor ? decodeInvoiceCursor(String(req.query.cursor)) : undefined;
+        const invalid =
+          status && !INVOICE_STATUSES.includes(status as InvoiceStatus)
+            ? { code: 'INVALID_STATUS', message: `status must be one of ${INVOICE_STATUSES.join(', ')}` }
+            : after === null
+              ? { code: 'INVALID_CURSOR', message: 'cursor is not valid; restart from the first page' }
+              : null;
+        if (invalid) {
+          metrics.recordOperation({
+            operation: 'invoice.list',
+            actor_type: 'seller',
+            result: 'failure',
+            latency_ms: performance.now() - start,
+            correlation_id: corrId,
+            http_status: 400,
+            error_code: invalid.code,
+          });
+          return sendFailure(res, 400, invalid.message, { code: invalid.code, correlationId: corrId });
+        }
 
-        const invoices = await storage.getInvoicesBySeller(
+        const limit = toPositiveInt(req.query.limit, 50);
+        // A cursor fully positions the page; offset only applies to legacy offset paging.
+        const offset = after ? 0 : toPositiveInt(req.query.offset, 0);
+
+        // Fetch one extra row to learn whether another page exists.
+        const rows = await storage.getInvoicesBySeller(
           sellerPublicKey as string,
-          status as string | undefined,
-          limit,
-          offset
+          status,
+          limit + 1,
+          offset,
+          after ?? undefined
         );
+        const hasMore = rows.length > limit;
+        const invoices = rows.slice(0, limit);
+        const last = invoices[invoices.length - 1];
+        const nextCursor = hasMore && last ? encodeInvoiceCursor(last) : null;
 
         const duration = performance.now() - start;
         metrics.recordOperation({
@@ -330,7 +360,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
 
         invoices.forEach(syncNotifications);
         sendSuccess(res, 200, invoices, {
-          pagination: { limit, offset, total: invoices.length },
+          pagination: { limit, offset, total: invoices.length, nextCursor, hasMore },
         });
       } catch (error: any) {
         const duration = performance.now() - start;
