@@ -64,6 +64,30 @@ CREATE TABLE IF NOT EXISTS payment_events (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Background jobs (see docs/JOBS.md): durable queue with retry + dead-letter state.
+CREATE TABLE IF NOT EXISTS jobs (
+  id UUID PRIMARY KEY,
+  type VARCHAR(100) NOT NULL,
+  payload JSONB NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued', 'running', 'succeeded', 'dead')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  retry_policy JSONB NOT NULL,
+  run_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  locked_until TIMESTAMPTZ,
+  locked_by VARCHAR(100),
+  idempotency_key VARCHAR(255),
+  correlation_id VARCHAR(100),
+  errors JSONB NOT NULL DEFAULT '[]'::jsonb,
+  result JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency_key ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(run_at) WHERE status IN ('queued', 'running');
+CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs(status, created_at DESC);
+
 -- Wallet alignment: databases created before wallet-scoped sellers still have
 -- the unused users table and invoices.user_id column. Both are dropped here so
 -- re-running the migration converges on the wallet-only schema.

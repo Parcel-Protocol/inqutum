@@ -29,6 +29,7 @@ async function migrate() {
     console.log('  - invoices (keyed by seller_public_key)');
     console.log('  - transactions');
     console.log('  - payment_events');
+    console.log('  - jobs (background job queue)');
     console.log('\n📊 Created views:');
     console.log('  - invoice_stats\n');
 
