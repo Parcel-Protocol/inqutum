@@ -44,6 +44,12 @@ export interface PayerInfo {
   payerEmail?: string;
 }
 
+export interface OverduePendingInvoices {
+  total: number;
+  /** Oldest expiry first. */
+  invoices: Array<Pick<StoredInvoice, 'id' | 'sellerPublicKey' | 'expiresAt'>>;
+}
+
 /**
  * Storage adapter the shared invoice handlers run against.
  *
@@ -77,6 +83,11 @@ export interface InvoiceStorage {
   getInvoiceStats(sellerPublicKey: string): Promise<InvoiceStats[]>;
   /** Explicit maintenance hook; reads also apply this transition lazily. */
   markExpiredInvoices(now?: Date): Promise<number>;
+  /**
+   * Read-only drift check for the ops report: PENDING invoices whose expiry is
+   * at or before `cutoff`. Must not apply the lazy expiry transition.
+   */
+  findOverduePendingInvoices(cutoff: Date, limit: number): Promise<OverduePendingInvoices>;
 
   // Audit trail methods
   recordAuditEvent?(event: Omit<AuditEvent, 'id' | 'timestamp'> & { timestamp?: string }): Promise<AuditEvent>;

@@ -231,6 +231,29 @@ export class InvoiceService {
   /**
    * Mark expired invoices
    */
+  /** Read-only: PENDING rows past expiry that no sweep has transitioned yet. */
+  async findOverduePendingInvoices(
+    cutoff: Date,
+    limit: number
+  ): Promise<{ total: number; invoices: Array<Pick<Invoice, 'id' | 'sellerPublicKey' | 'expiresAt'>> }> {
+    const result = await this.db.query(
+      `SELECT id, seller_public_key, expires_at, COUNT(*) OVER () AS total
+       FROM invoices
+       WHERE status = 'PENDING' AND expires_at <= $1
+       ORDER BY expires_at ASC
+       LIMIT $2`,
+      [cutoff, limit]
+    );
+    return {
+      total: Number(result.rows[0]?.total ?? 0),
+      invoices: result.rows.map((row) => ({
+        id: row.id,
+        sellerPublicKey: row.seller_public_key,
+        expiresAt: new Date(row.expires_at),
+      })),
+    };
+  }
+
   async markExpiredInvoices(now: Date = new Date()): Promise<number> {
     const query = `
       UPDATE invoices 
