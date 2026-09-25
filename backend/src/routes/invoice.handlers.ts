@@ -30,6 +30,7 @@ import {
   InvalidTransitionError,
   describeLifecycle,
 } from '../../../shared/invoice-lifecycle';
+import { mayAccessSeller, sendForbiddenOwnership } from '../middleware/access-control';
 import { checkInvoiceVerifyLimit } from '../middleware/rate-limit';
 import { cacheVerificationResult } from '../middleware/verify-cache';
 import { verifySellerSignature } from '../utils/signature-verification';
@@ -54,6 +55,7 @@ export interface InvoiceHandlerOptions {
 
 export interface InvoiceHandlers {
   getLifecycle(req: Request, res: Response): Promise<void>;
+  getAuditTrail(req: Request, res: Response): Promise<void>;
   createInvoice(req: Request, res: Response): Promise<void>;
   getInvoice(req: Request, res: Response): Promise<void>;
   getInvoices(req: Request, res: Response): Promise<void>;
@@ -79,6 +81,18 @@ function toPositiveInt(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+/**
+ * Whether the local-only simulate endpoint is switched on. Shared by the route
+ * (which hides the endpoint entirely when off) and the handler, so the two can
+ * never disagree about when "simulation is disabled" applies.
+ */
+export function isSimulationEnabled(options: Pick<InvoiceHandlerOptions, 'allowSimulate'>): boolean {
+  return (
+    process.env.NODE_ENV !== 'production' &&
+    (options.allowSimulate !== undefined ? options.allowSimulate : simulationAllowed())
+  );
+}
+
 /** 400 with a stable code: the invoice's state does not allow the requested move. */
 function sendInvalidTransition(res: Response, error: InvalidTransitionError): void {
   sendFailure(res, 400, error.message, error.code, { from: error.from, to: error.to });
@@ -95,12 +109,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
   const frontendUrl = () =>
     options.frontendUrl || process.env.FRONTEND_URL || 'http://localhost:3000';
 
-  const simulateAllowed = () =>
-    process.env.NODE_ENV !== 'production' && (
-      options.allowSimulate !== undefined
-        ? options.allowSimulate
-        : simulationAllowed()
-    );
+  const simulateAllowed = () => isSimulationEnabled(options);
 
   const buildPaymentPayload = async (invoice: StoredInvoice) => {
     const paymentUrl = `${frontendUrl()}/pay/${invoice.id}`;
@@ -136,6 +145,24 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
       sendSuccess(res, 200, describeLifecycle());
     },
 
+    // Who did what to an invoice, oldest first. Owner, maintainer or service only.
+    async getAuditTrail(req: Request, res: Response) {
+      try {
+        const invoice = await storage.getInvoiceById(req.params.id);
+        if (!invoice) {
+          return sendFailure(res, 404, 'Invoice not found', 'INVOICE_NOT_FOUND');
+        }
+        if (!mayAccessSeller(req.actor, 'invoice:audit', invoice.sellerPublicKey)) {
+          return sendForbiddenOwnership(res);
+        }
+
+        sendSuccess(res, 200, await storage.getAuditTrail(invoice.id));
+      } catch (error: any) {
+        logError('Get audit trail error:', error);
+        sendFailure(res, 500, error.message || 'Failed to get audit trail');
+      }
+    },
+
     async createInvoice(req: Request, res: Response) {
       if (cutoverDrainMode()) {
         return sendFailure(
@@ -147,6 +174,10 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
       const requestId = createRequestId();
       try {
         const validatedData = createInvoiceSchema.parse(req.body);
+        // A seller may only issue invoices payable to their own wallet.
+        if (!mayAccessSeller(req.actor, 'invoice:create', validatedData.sellerPublicKey)) {
+          return sendForbiddenOwnership(res);
+        }
         if (validatedData.network && validatedData.network !== STELLAR_NETWORK) {
           return sendFailure(res, 400, 'Client wallet network does not match the server Stellar network');
         }
@@ -192,6 +223,10 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         const sellerCheck = stellarPublicKeySchema.safeParse(sellerPublicKey);
         if (!sellerCheck.success) {
           return sendFailure(res, 400, 'sellerPublicKey must be a valid Stellar public key');
+        }
+
+        if (!mayAccessSeller(req.actor, 'invoice:list', sellerCheck.data)) {
+          return sendForbiddenOwnership(res);
         }
 
         const limit = toPositiveInt(req.query.limit, 50);
@@ -270,6 +305,24 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
             }
             sellerPublicKey = parsed.data;
           }
+        }
+
+        // A wallet-authenticated seller is identified by the session, not by a
+        // key in the request body: a claimed key that names someone else is a
+        // forbidden attempt, and an omitted key defaults to the caller's own.
+        // Maintainers act across sellers, so the invoice's own seller is used.
+        const actor = req.actor;
+        if (actor?.role === 'end_user') {
+          if (sellerPublicKey && sellerPublicKey !== actor.wallet) {
+            return sendForbiddenOwnership(res);
+          }
+          sellerPublicKey = actor.wallet;
+        } else if (actor?.role === 'maintainer') {
+          const target = await storage.getInvoiceById(req.params.id);
+          if (!target) {
+            return sendFailure(res, 404, 'Invoice not found', 'INVOICE_NOT_FOUND');
+          }
+          sellerPublicKey = target.sellerPublicKey;
         }
 
         // Require explicit ownership proof (no more unauthenticated cancellation)
@@ -360,7 +413,12 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         const lowerMessage = message.toLowerCase();
         const isSellerMismatch = lowerMessage.includes('only the seller can cancel');
         const isUnauthorized = lowerMessage.includes('unauthorized');
-        sendFailure(res, isSellerMismatch ? 403 : isUnauthorized ? 401 : 400, message);
+        sendFailure(
+          res,
+          isSellerMismatch ? 403 : isUnauthorized ? 401 : 400,
+          message,
+          isSellerMismatch ? 'FORBIDDEN' : undefined
+        );
       }
     },
 
@@ -511,6 +569,10 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         const sellerCheck = stellarPublicKeySchema.safeParse(sellerPublicKey);
         if (!sellerCheck.success) {
           return sendFailure(res, 400, 'sellerPublicKey must be a valid Stellar public key');
+        }
+
+        if (!mayAccessSeller(req.actor, 'invoice:stats', sellerCheck.data)) {
+          return sendForbiddenOwnership(res);
         }
 
         const stats = await storage.getInvoiceStats(sellerCheck.data);

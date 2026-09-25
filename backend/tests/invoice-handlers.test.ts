@@ -709,6 +709,7 @@ describe('shared invoice router', () => {
       'GET /invoices',
       'GET /invoices/:id',
       'GET /invoices/:id/payment-info',
+      'GET /invoices/:id/audit',
       'POST /invoices/:id/cancel',
       'POST /invoices/:id/verify',
       'POST /invoices/:id/simulate-payment',

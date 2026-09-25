@@ -8,6 +8,9 @@ import {
   toApiError,
 } from './api-runtime';
 import { resolveVerificationError } from './verification';
+import { Networks } from '@stellar/stellar-sdk';
+import { createSessionManager, installWalletAuth } from './auth-session.ts';
+import { useWalletStore } from './store';
 
 const USE_MOCK_API = process.env.NEXT_PUBLIC_USE_MOCK === 'true';
 export const API_CONFIG = resolveApiConfig(
@@ -23,6 +26,39 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Sellers prove wallet ownership once per session (see docs/ACCESS-CONTROL.md);
+// this attaches the resulting token and signs in on demand when the server asks.
+// Installed before the error normaliser below so it sees the raw 401. Hidden
+// buttons are a courtesy: the server refuses unauthorised calls regardless.
+if (!USE_MOCK_API) {
+  const networkPassphrase =
+    (process.env.NEXT_PUBLIC_STELLAR_NETWORK || 'TESTNET').toUpperCase() === 'PUBLIC'
+      ? Networks.PUBLIC
+      : Networks.TESTNET;
+
+  installWalletAuth(
+    api,
+    createSessionManager({
+      getWallet: () => useWalletStore.getState().publicKey,
+      networkPassphrase,
+      storage: typeof window !== 'undefined' ? window.sessionStorage : null,
+      signChallenge: async (xdr) => {
+        const { signTransaction } = await import('@stellar/freighter-api');
+        const result: any = await signTransaction(xdr, { networkPassphrase });
+        const signed =
+          typeof result === 'string' ? result : result?.signedTxXdr ?? result?.signedTransaction;
+        if (!signed) throw new Error('Freighter did not return a signed sign-in challenge');
+        return signed;
+      },
+      // Bare axios: this call must not pass through the interceptor it serves.
+      exchange: async (transaction) => {
+        const response = await axios.post(`${API_CONFIG.baseUrl}/auth/session`, { transaction });
+        return response.data.data;
+      },
+    })
+  );
+}
 
 api.interceptors.response.use(
   (response) => response,

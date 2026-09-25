@@ -1,5 +1,7 @@
 import { Router, Request, Response, NextFunction, RequestHandler } from 'express';
-import { createInvoiceHandlers, InvoiceHandlerOptions } from './invoice.handlers';
+import { createInvoiceHandlers, isSimulationEnabled, InvoiceHandlerOptions } from './invoice.handlers';
+import { authenticate, requirePermission } from '../middleware/access-control';
+import { sendFailure } from '../types/api';
 import {
   createInvoiceRateLimiters,
   createVerifyRateLimiters,
@@ -30,10 +32,20 @@ export interface InvoiceRouterOptions extends InvoiceHandlerOptions {
  *   POST   /invoices/:id/cancel (seller authorized)
  *   POST   /invoices/:id/verify
  *   POST   /invoices/:id/simulate-payment
+ *   GET    /invoices/:id/audit
+ *
+ * Every route declares the permission it needs (see shared/access-control.ts),
+ * checked before any handler runs. Handlers then apply the resource-level rule
+ * for owner-scoped permissions ("only your own invoices"). A route added here
+ * without a `requirePermission` guard fails tests/access-control.test.ts.
  */
 export function createInvoiceRouter(options: InvoiceRouterOptions): Router {
   const handlers = createInvoiceHandlers(options);
   const router = Router();
+
+  // Resolve the caller on every invoice route. This never rejects; the
+  // per-route guards below decide.
+  router.use('/invoices', authenticate());
 
   const enableRateLimiting =
     options.enableRateLimiting ??
@@ -61,21 +73,36 @@ export function createInvoiceRouter(options: InvoiceRouterOptions): Router {
     createMiddlewares.push(...createInvoiceRateLimiters());
   }
 
-  router.post('/invoices', ...createMiddlewares, handlers.createInvoice);
+  router.post(
+    '/invoices',
+    requirePermission('invoice:create'),
+    ...createMiddlewares,
+    handlers.createInvoice
+  );
   // Static routes stay before the dynamic /invoices/:id so they are not shadowed.
-  router.get('/invoices/lifecycle', handlers.getLifecycle);
-  router.get('/invoices/stats', handlers.getStats);
+  router.get('/invoices/lifecycle', requirePermission('lifecycle:read'), handlers.getLifecycle);
+  router.get('/invoices/stats', requirePermission('invoice:stats'), handlers.getStats);
 
   const getInvoicesMiddlewares: RequestHandler[] = [];
   if (enableRateLimiting) {
     getInvoicesMiddlewares.push(createGetInvoicesRateLimiter());
   }
-  router.get('/invoices', ...getInvoicesMiddlewares, handlers.getInvoices);
+  router.get(
+    '/invoices',
+    requirePermission('invoice:list'),
+    ...getInvoicesMiddlewares,
+    handlers.getInvoices
+  );
 
-  router.get('/invoices/:id', handlers.getInvoice);
+  router.get('/invoices/:id', requirePermission('invoice:read'), handlers.getInvoice);
 
   // GET /invoices/:id/payment-info - Payment info (no rate limit, needed for checkout)
-  router.get('/invoices/:id/payment-info', handlers.getPaymentInfo);
+  router.get(
+    '/invoices/:id/payment-info',
+    requirePermission('invoice:read'),
+    handlers.getPaymentInfo
+  );
+  router.get('/invoices/:id/audit', requirePermission('invoice:audit'), handlers.getAuditTrail);
 
   const cancelMiddlewares: RequestHandler[] = [];
   const cancelAuthPreCheck: RequestHandler = (req: Request, res: Response, next: NextFunction) => {
@@ -100,7 +127,12 @@ export function createInvoiceRouter(options: InvoiceRouterOptions): Router {
   if (enableRateLimiting) {
     cancelMiddlewares.push(createCancelInvoiceRateLimiter());
   }
-  router.post('/invoices/:id/cancel', ...cancelMiddlewares, handlers.cancelInvoice);
+  router.post(
+    '/invoices/:id/cancel',
+    requirePermission('invoice:cancel'),
+    ...cancelMiddlewares,
+    handlers.cancelInvoice
+  );
 
   const verifyMiddlewares: RequestHandler[] = [];
   if (enableConcurrencyLock) {
@@ -109,9 +141,25 @@ export function createInvoiceRouter(options: InvoiceRouterOptions): Router {
   if (enableRateLimiting) {
     verifyMiddlewares.push(...createVerifyRateLimiters());
   }
-  router.post('/invoices/:id/verify', ...verifyMiddlewares, handlers.verifyPayment);
+  router.post(
+    '/invoices/:id/verify',
+    requirePermission('invoice:verify'),
+    ...verifyMiddlewares,
+    handlers.verifyPayment
+  );
 
-  router.post('/invoices/:id/simulate-payment', handlers.simulatePayment);
+  // A switched-off simulate endpoint must look like it does not exist, so the
+  // switch is checked before authentication can leak that the route is real.
+  const simulationSwitch: RequestHandler = (_req, res, next) =>
+    isSimulationEnabled(options)
+      ? next()
+      : sendFailure(res, 404, 'Endpoint not found');
+  router.post(
+    '/invoices/:id/simulate-payment',
+    simulationSwitch,
+    requirePermission('invoice:simulate'),
+    handlers.simulatePayment
+  );
 
   return router;
 }

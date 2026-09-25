@@ -22,6 +22,13 @@ import { PostgresInvoiceStorage } from '../src/storage/postgres-invoice-storage.
 import type { InvoiceStorage } from '../src/storage/invoice-storage.ts';
 import { FakeInvoiceDb } from './fixtures/fake-invoice-db.fixture.ts';
 
+// The code under test logs every request and every rejected call. That output is
+// noise here and, at volume, makes the node:test runner's IPC stream flaky
+// ("Unable to deserialize cloned data"), so this file keeps it quiet.
+for (const method of ['log', 'warn', 'error'] as const) {
+  console[method] = () => undefined;
+}
+
 const SELLER = 'G' + 'A'.repeat(55);
 const OTHER_SELLER = 'G' + 'B'.repeat(55);
 const PAYER = 'G' + 'C'.repeat(55);

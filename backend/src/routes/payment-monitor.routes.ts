@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import paymentMonitorService, { PaymentMonitorService } from '../services/payment-monitor.service';
+import { authenticate, requirePermission } from '../middleware/access-control';
 
 /**
  * Creates the payment monitor HTTP router.
@@ -9,7 +10,9 @@ export function createPaymentMonitorRouter(
 ): Router {
   const router = Router();
 
-  router.post('/payment/sync', async (req: Request, res: Response) => {
+  router.use('/payment', authenticate());
+
+  router.post('/payment/sync', requirePermission('monitor:sync'), async (req: Request, res: Response) => {
     try {
       const limit = Number(req.body?.limit) || 50;
       await monitor.manualSync(limit);
@@ -26,7 +29,7 @@ export function createPaymentMonitorRouter(
     }
   });
 
-  router.get('/payment/monitor/status', (_req: Request, res: Response) => {
+  router.get('/payment/monitor/status', requirePermission('monitor:read'), (_req: Request, res: Response) => {
     res.json({
       success: true,
       data: monitor.getStatus(),

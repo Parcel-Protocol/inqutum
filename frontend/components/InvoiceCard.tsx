@@ -13,6 +13,7 @@ import { canSendProofEmail } from '@/lib/mailto-delivery';
 import { effectiveInvoiceStatus } from '@/lib/invoice-lifecycle';
 import { describeAmount, statusBadgeLabel, statusText } from '@/lib/a11y';
 import { invoiceApi } from '@/lib/api';
+import { canDo, roleForSession } from '@/lib/capabilities';
 
 interface Invoice {
   id: string;
@@ -100,7 +101,13 @@ export default function InvoiceCard({ invoice, userWallet, onCancel }: InvoiceCa
     }
   };
 
-  const isSeller = !invoice.sellerPublicKey || !userWallet || invoice.sellerPublicKey === userWallet;
+  // Shown only to the wallet that owns the invoice. Derived from the same
+  // permission table the API enforces; the API refuses the call regardless.
+  const canCancel = canDo(
+    roleForSession({ connected: Boolean(userWallet), publicKey: userWallet }),
+    'invoice:cancel',
+    { wallet: userWallet, sellerPublicKey: invoice.sellerPublicKey }
+  );
 
   // Ids are scoped to the invoice: the dashboard renders many of these cards.
   const headingId = `invoice-${invoice.id}-heading`;
@@ -210,7 +217,7 @@ export default function InvoiceCard({ invoice, userWallet, onCancel }: InvoiceCa
                 <Hash className="w-4 h-4" aria-hidden="true" />
               )}
             </button>
-            {isSeller && (
+            {canCancel && (
               <button
                 onClick={handleCancel}
                 disabled={cancelling}
