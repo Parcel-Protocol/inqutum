@@ -11,6 +11,14 @@ import { MemoryStorage } from '../src/storage/memory-storage';
 import { resetRateLimiters } from '../src/middleware/rate-limit';
 import { walletAuth } from './fixtures/auth.fixture';
 
+// The code under test logs every request and error. Written to stdout at the
+// same time the test runner streams its own results back, that output
+// intermittently corrupts the runner's stream and fails the whole file with
+// "Unable to deserialize cloned data", so it is silenced here.
+for (const method of ['log', 'warn', 'error'] as const) {
+  console[method] = () => undefined;
+}
+
 interface HttpResponse {
   status: number;
   headers: http.IncomingHttpHeaders;

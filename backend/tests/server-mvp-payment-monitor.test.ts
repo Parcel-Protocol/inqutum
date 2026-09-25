@@ -15,6 +15,14 @@ import paymentMonitorService, {
 } from '../src/services/payment-monitor.service';
 import { FilePaymentMonitorCheckpointStore } from '../src/services/payment-monitor-checkpoint';
 
+// The code under test logs every request and error. Written to stdout at the
+// same time the test runner streams its own results back, that output
+// intermittently corrupts the runner's stream and fails the whole file with
+// "Unable to deserialize cloned data", so it is silenced here.
+for (const method of ['log', 'warn', 'error'] as const) {
+  console[method] = () => undefined;
+}
+
 const SELLER = 'GB3Q3VRHH3OQDYITTLONDLEHWQGKB27T2BEDSFHIUMOERULVXPDXRKG4';
 const PAYER = 'GB6IHEZ4QNOHJZRYRFLOC45P4SK3KKL6KNPI5WEG6FNVSZ2K5FS2MNY7';
 const TX_HASH = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
