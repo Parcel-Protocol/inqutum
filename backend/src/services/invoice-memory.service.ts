@@ -4,7 +4,7 @@ import { generatePublicInvoiceId } from '../utils/memory-public-id';
 import { CreateInvoiceInput } from '../utils/validation';
 import memoryStorage, { MemoryStorage, MemoryPaymentEvent } from '../storage/memory-storage';
 import { calculateInvoiceExpiry } from '../domain/invoice-expiry';
-import type { StoredInvoice } from '../storage/invoice-storage';
+import type { AuditEvent, StoredInvoice } from '../storage/invoice-storage';
 import type { InvoiceStats } from '../storage/invoice-stats';
 import type { MarkAsPaidOptions, PayerInfo } from '../storage/invoice-storage';
 
@@ -96,7 +96,7 @@ export class InvoiceMemoryService {
     const invoice = this.storage.markAsPaid(invoiceId, txHash, payerPublicKey, payerInfo, options);
 
     if (!invoice) {
-      throw new Error('Invoice not found, expired, or already processed');
+      throw new Error('Invoice not found');
     }
 
     console.log('✅ Invoice marked as paid:', invoiceId);
@@ -121,13 +121,17 @@ export class InvoiceMemoryService {
   async cancelInvoice(invoiceId: string, sellerPublicKey?: string): Promise<StoredInvoice> {
     const updated = this.storage.cancelInvoice(invoiceId, sellerPublicKey);
     if (!updated) {
-      throw new Error('Invoice not found or already processed');
+      throw new Error('Invoice not found');
     }
     return updated;
   }
 
   async logPaymentEvent(invoiceId: string, eventType: string, eventData: any): Promise<void> {
     this.storage.logPaymentEvent(invoiceId, eventType, eventData);
+  }
+
+  async getAuditTrail(invoiceId: string): Promise<AuditEvent[]> {
+    return this.storage.getAuditTrail(invoiceId);
   }
 
   async getPaymentEvents(invoiceId?: string): Promise<MemoryPaymentEvent[]> {

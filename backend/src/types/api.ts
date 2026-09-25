@@ -22,10 +22,27 @@ export interface ApiSuccess<T> {
   pagination?: ApiPagination;
 }
 
+/**
+ * Stable machine-readable codes for failures that are not payment-verification
+ * rejections. Clients branch on these, never on the human-readable `error`.
+ */
+export type ApiErrorCode =
+  | 'INVALID_TRANSITION'
+  | 'INVOICE_NOT_FOUND'
+  | 'UNAUTHENTICATED'
+  | 'FORBIDDEN'
+  | 'IDEMPOTENCY_KEY_INVALID'
+  | 'IDEMPOTENCY_KEY_REQUIRED'
+  | 'IDEMPOTENCY_KEY_CONFLICT'
+  | 'IDEMPOTENCY_KEY_EXPIRED'
+  | 'IDEMPOTENCY_IN_PROGRESS';
+
 export interface ApiFailure {
   success: false;
   error: string;
-  code?: VerificationCode;
+  code?: VerificationCode | ApiErrorCode;
+  /** Extra structured context for the code, e.g. `{ from, to }` for INVALID_TRANSITION. */
+  details?: Record<string, unknown>;
 }
 
 export interface CancelInvoiceInput {
@@ -69,8 +86,17 @@ export function sendSuccess<T>(
   res.status(status).json(apiSuccess(data, extra));
 }
 
-export function sendFailure(res: Response, status: number, error: string): void {
-  res.status(status).json(apiFailure(error));
+export function sendFailure(
+  res: Response,
+  status: number,
+  error: string,
+  code?: ApiFailure['code'],
+  details?: ApiFailure['details']
+): void {
+  const body = apiFailure(error);
+  if (code) body.code = code;
+  if (details) body.details = details;
+  res.status(status).json(body);
 }
 
 export function sendVerificationFailure(

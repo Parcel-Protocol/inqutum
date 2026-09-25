@@ -12,7 +12,23 @@ import type { InvoiceStats } from './invoice-stats';
 // single-transition PENDING->CANCELLED, lazy
 // markExpiredInvoices on all reads, strict seller_public_key scoping on list
 // and stats) is pinned by the shared test suite in invoice-handlers.test.ts.
-export type InvoiceStatus = 'PENDING' | 'PAID' | 'EXPIRED' | 'CANCELLED';
+// The status set and its legal transitions live in shared/invoice-lifecycle.ts;
+// both stores and the UI ask that module rather than re-deriving the rules.
+import type { InvoiceStatus } from '../../../shared/invoice-lifecycle';
+export type { InvoiceStatus };
+
+/**
+ * One row of an invoice's audit trail: a state change or payment event that
+ * affected the user or their funds. Backed by `payment_events` in Postgres and
+ * an in-process list in the memory store.
+ */
+export interface AuditEvent {
+  id: string;
+  invoiceId: string;
+  eventType: string;
+  eventData: Record<string, unknown> | null;
+  createdAt: Date;
+}
 
 // Invoice shape shared by both storage backends.
 export interface StoredInvoice {
@@ -87,4 +103,6 @@ export interface InvoiceStorage {
   markExpiredInvoices(now?: Date): Promise<number>;
   /** Returns total count of invoices currently stored. */
   countInvoices?(): Promise<number>;
+  /** Audit events for one invoice, oldest first. */
+  getAuditTrail(invoiceId: string): Promise<AuditEvent[]>;
 }

@@ -22,6 +22,7 @@ export interface InvoiceRouterOptions extends InvoiceHandlerOptions {
  * Route list is kept identical between server.ts (Postgres) and
  * server-mvp.ts (in-memory):
  *   POST   /invoices
+ *   GET    /invoices/lifecycle
  *   GET    /invoices/stats
  *   GET    /invoices
  *   GET    /invoices/:id
@@ -61,6 +62,8 @@ export function createInvoiceRouter(options: InvoiceRouterOptions): Router {
   }
 
   router.post('/invoices', ...createMiddlewares, handlers.createInvoice);
+  // Static routes stay before the dynamic /invoices/:id so they are not shadowed.
+  router.get('/invoices/lifecycle', handlers.getLifecycle);
   router.get('/invoices/stats', handlers.getStats);
 
   const getInvoicesMiddlewares: RequestHandler[] = [];

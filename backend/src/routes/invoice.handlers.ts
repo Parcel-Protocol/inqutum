@@ -26,6 +26,10 @@ import {
 } from '../domain/invoice-settlement';
 import { cutoverDrainMode, simulationAllowed } from '../config/runtime';
 import { createRequestId } from '../utils/request-correlation-id';
+import {
+  InvalidTransitionError,
+  describeLifecycle,
+} from '../../../shared/invoice-lifecycle';
 import { checkInvoiceVerifyLimit } from '../middleware/rate-limit';
 import { cacheVerificationResult } from '../middleware/verify-cache';
 import { verifySellerSignature } from '../utils/signature-verification';
@@ -49,6 +53,7 @@ export interface InvoiceHandlerOptions {
 }
 
 export interface InvoiceHandlers {
+  getLifecycle(req: Request, res: Response): Promise<void>;
   createInvoice(req: Request, res: Response): Promise<void>;
   getInvoice(req: Request, res: Response): Promise<void>;
   getInvoices(req: Request, res: Response): Promise<void>;
@@ -72,6 +77,11 @@ function logError(label: string, error: any, requestId?: string): void {
 function toPositiveInt(value: unknown, fallback: number): number {
   const parsed = parseInt(String(value), 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+/** 400 with a stable code: the invoice's state does not allow the requested move. */
+function sendInvalidTransition(res: Response, error: InvalidTransitionError): void {
+  sendFailure(res, 400, error.message, error.code, { from: error.from, to: error.to });
 }
 
 /**
@@ -120,6 +130,12 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
   };
 
   return {
+    // The lifecycle the UI and API both derive state from. Static, so it is safe
+    // to serve to anyone and to cache.
+    async getLifecycle(_req: Request, res: Response) {
+      sendSuccess(res, 200, describeLifecycle());
+    },
+
     async createInvoice(req: Request, res: Response) {
       if (cutoverDrainMode()) {
         return sendFailure(
@@ -337,6 +353,9 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         sendSuccess(res, 200, invoice);
       } catch (error: any) {
         logError('Cancel invoice error:', error);
+        if (error instanceof InvalidTransitionError) {
+          return sendInvalidTransition(res, error);
+        }
         const message = error.message || 'Failed to cancel invoice';
         const lowerMessage = message.toLowerCase();
         const isSellerMismatch = lowerMessage.includes('only the seller can cancel');
@@ -462,6 +481,9 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
               latestStatus.code,
               latestStatus.error
             );
+          }
+          if (error instanceof InvalidTransitionError) {
+            return sendInvalidTransition(res, error);
           }
           throw error;
         }

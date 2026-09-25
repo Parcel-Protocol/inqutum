@@ -10,7 +10,8 @@
  * response body a caller actually receives.
  */
 
-export type InvoiceStatus = 'PENDING' | 'PAID' | 'EXPIRED' | 'CANCELLED';
+import type { InvoiceStatus } from './invoice-lifecycle';
+export type { InvoiceStatus };
 
 /** ISO-8601 timestamp, as produced by JSON serialisation of a Date. */
 export type IsoTimestamp = string;

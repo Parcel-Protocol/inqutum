@@ -356,7 +356,12 @@ describe('InvoiceService (Postgres) seller scoping', () => {
 
     await assert.rejects(
       () => service.markAsPaid(created.id, 'e'.repeat(64), PAYER),
-      /Invoice not found, expired, or already processed/
+      (error: any) => {
+        assert.equal(error.code, 'INVALID_TRANSITION');
+        assert.equal(error.from, 'EXPIRED');
+        assert.equal(error.to, 'PAID');
+        return true;
+      }
     );
 
     const fetched = await service.getInvoiceById(created.id);
@@ -373,7 +378,12 @@ describe('InvoiceService (Postgres) seller scoping', () => {
 
     await assert.rejects(
       () => service.cancelInvoice(pending.id),
-      /Invoice not found or already processed/
+      (error: any) => {
+        assert.equal(error.code, 'INVALID_TRANSITION');
+        assert.equal(error.from, 'CANCELLED');
+        assert.equal(error.to, 'CANCELLED');
+        return true;
+      }
     );
   });
 
