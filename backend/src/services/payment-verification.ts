@@ -10,6 +10,7 @@
  * Horizon and hand them in. See README.md "Payment verification contract".
  */
 
+import * as StellarSdk from '@stellar/stellar-sdk';
 import {
   assetsMatch,
   formatAssetIdentity,
@@ -159,6 +160,8 @@ export interface ExpectedPayment {
 export interface HorizonTransactionLike {
   memo?: string | null;
   memo_type?: string | null;
+  envelope_type?: string | null;
+  inner_transaction?: HorizonTransactionLike | null;
 }
 
 export interface HorizonOperationLike {
@@ -169,6 +172,7 @@ export interface HorizonOperationLike {
   asset_type?: string;
   asset_code?: string;
   asset_issuer?: string;
+  to_muxed_id?: string | number;
 }
 
 export interface VerifiedPayment {
@@ -202,6 +206,41 @@ function assetCodeOf(operation: HorizonOperationLike): string {
   return operation.asset_type === 'native' ? 'XLM' : operation.asset_code ?? '';
 }
 
+/**
+ * Invoice destinations are exact Stellar addresses. Muxed addresses retain
+ * their sub-account id; a base G address never matches an M address.
+ */
+export function normalizeDestination(destination: unknown, muxedId?: unknown): string {
+  if (typeof destination !== 'string') return '';
+  const normalized = destination.trim();
+  // An M address carries its own sub-account id in the string itself.
+  if (normalized.startsWith('M')) {
+    return normalized;
+  }
+  if (muxedId === undefined || muxedId === null || String(muxedId).trim() === '') {
+    return normalized;
+  }
+  if (normalized.startsWith('G')) {
+    try {
+      const muxed = new StellarSdk.MuxedAccount(
+        new StellarSdk.Account(normalized, '0'),
+        String(muxedId),
+      );
+      return muxed.accountId();
+    } catch {
+      // Preserve a deterministic non-match for malformed fixture data.
+      return `${normalized}:${String(muxedId).trim()}`;
+    }
+  }
+  return `${normalized}:${String(muxedId).trim()}`;
+}
+
+function transactionForVerification(transaction: HorizonTransactionLike): HorizonTransactionLike {
+  return transaction?.envelope_type === 'fee_bump'
+    ? transaction.inner_transaction ?? transaction
+    : transaction;
+}
+
 export function amountsMatch(actual: unknown, expected: string | number): boolean {
   return stroopAmountsMatch(expected, actual, 0);
 }
@@ -209,8 +248,12 @@ export function amountsMatch(actual: unknown, expected: string | number): boolea
 /**
  * Verify a Horizon transaction against what an invoice expects.
  *
- * Checks run in a fixed order so every caller reports the same first failure:
- * tx hash, network, payment operation, memo, destination, amount, asset.
+ * Policy: any plain `payment` operation that matches the invoice settles it;
+ * unrelated operations are ignored. Path payments are never accepted. Fee-bump
+ * envelopes use the inner transaction for memo and operations, while the hash
+ * supplied by the caller (the outer transaction hash) is persisted.
+ * Checks run in a fixed order: tx hash, network, payment operation, memo,
+ * destination, amount, asset.
  */
 export function verifyHorizonPayment(input: VerifyPaymentInput): VerificationResult<VerifiedPayment> {
   const hashCheck = checkTxHash(input.txHash);
@@ -218,14 +261,15 @@ export function verifyHorizonPayment(input: VerifyPaymentInput): VerificationRes
     return hashCheck;
   }
 
-  const { expected, transaction, operations, network } = input;
+  const { expected, operations, network } = input;
+  const transaction = transactionForVerification(input.transaction);
 
   if (expected.network && network && expected.network !== network) {
     return failure('NETWORK_MISMATCH');
   }
 
-  const paymentOp = (operations || []).find((operation) => operation.type === 'payment');
-  if (!paymentOp) {
+  const paymentOps = (operations || []).filter((operation) => operation.type === 'payment');
+  if (paymentOps.length === 0) {
     return failure('NO_PAYMENT_OPERATION');
   }
 
@@ -233,11 +277,21 @@ export function verifyHorizonPayment(input: VerifyPaymentInput): VerificationRes
     return failure('MEMO_MISMATCH');
   }
 
-  if (paymentOp.to !== expected.destination) {
+  const destinationMatch = paymentOps.find((operation) =>
+    normalizeDestination(operation.to, operation.to_muxed_id) ===
+      normalizeDestination(expected.destination)
+  );
+  if (!destinationMatch) {
     return failure('DESTINATION_MISMATCH');
   }
 
-  if (!amountsMatch(paymentOp.amount, expected.amount)) {
+  const amountMatch = paymentOps.find(
+    (operation) =>
+      normalizeDestination(operation.to, operation.to_muxed_id) ===
+        normalizeDestination(expected.destination) &&
+      amountsMatch(operation.amount, expected.amount),
+  );
+  if (!amountMatch) {
     return failure('AMOUNT_MISMATCH');
   }
 
@@ -249,6 +303,25 @@ export function verifyHorizonPayment(input: VerifyPaymentInput): VerificationRes
     assetCode: expected.assetCode,
     assetIssuer: expected.assetIssuer,
   });
+  const assetMatch = paymentOps.find(
+    (operation) =>
+      normalizeDestination(operation.to, operation.to_muxed_id) ===
+        normalizeDestination(expected.destination) &&
+      amountsMatch(operation.amount, expected.amount) &&
+      assetsMatch(
+        invoiceAsset,
+        resolvePaymentAsset({
+          assetType: operation.asset_type,
+          assetCode: operation.asset_code,
+          assetIssuer: operation.asset_issuer,
+        }),
+      ),
+  );
+  if (!assetMatch) {
+    return failure('ASSET_MISMATCH');
+  }
+
+  const paymentOp = assetMatch;
   const paidAsset = resolvePaymentAsset({
     assetType: paymentOp.asset_type,
     assetCode: paymentOp.asset_code,
