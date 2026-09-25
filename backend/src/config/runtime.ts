@@ -73,7 +73,8 @@ export function corsOptions(env: RuntimeEnvironment = process.env): CorsOptions 
   return {
     credentials: true,
     methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Accept'],
+    allowedHeaders: ['Content-Type', 'Accept', 'X-Correlation-ID', 'X-Request-ID'],
+    exposedHeaders: ['X-Correlation-ID', 'X-Request-ID'],
     maxAge: 86400,
     origin(origin, callback) {
       // Health checks, curl and server-to-server calls do not carry Origin.

@@ -5,6 +5,7 @@
 // shared suite in invoice-handlers.test.ts runs these same handlers against
 // both adapters with the same assertions to guarantee field parity.
 import { Request, Response } from 'express';
+import { performance } from 'perf_hooks';
 import stellarService from '../services/stellar.service';
 import { createInvoiceSchema } from '../utils/validation';
 import { generatePaymentQR, generateStellarPaymentQR } from '../utils/qrcode';
@@ -19,6 +20,9 @@ import {
   verifyHorizonPayment,
 } from '../services/payment-verification';
 import { simulationAllowed } from '../config/runtime';
+import { metrics } from '../observability/telemetry';
+import { exportAuditEvents, AuditAction } from '../audit/audit-service';
+import { classifyError } from '../errors/error-taxonomy';
 
 /** Kept explicit so clients can tune polling without duplicating backend policy. */
 export const PAYMENT_STATUS_POLL_INTERVAL_MS = 3000;
@@ -46,6 +50,11 @@ export interface InvoiceHandlers {
   verifyPayment(req: Request, res: Response): Promise<void>;
   getStats(req: Request, res: Response): Promise<void>;
   simulatePayment(req: Request, res: Response): Promise<void>;
+  getInvoiceAuditTrail(req: Request, res: Response): Promise<void>;
+  getAuditEvents(req: Request, res: Response): Promise<void>;
+  exportAuditTrail(req: Request, res: Response): Promise<void>;
+  getObservabilityMetrics(req: Request, res: Response): Promise<void>;
+  getPrometheusMetrics(req: Request, res: Response): Promise<void>;
 }
 
 /**
@@ -60,6 +69,13 @@ function logError(label: string, error: any): void {
 function toPositiveInt(value: unknown, fallback: number): number {
   const parsed = parseInt(String(value), 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function getUserAgent(req: Request): string | undefined {
+  if (typeof req.get === 'function') {
+    return req.get('user-agent');
+  }
+  return (req.headers && req.headers['user-agent']) as string | undefined;
 }
 
 /**
@@ -109,10 +125,57 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
 
   return {
     async createInvoice(req: Request, res: Response) {
+      const start = performance.now();
+      const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
+
       try {
         const validatedData = createInvoiceSchema.parse(req.body);
         const invoice = await storage.createInvoice(validatedData);
         const payment = await buildPaymentPayload(invoice);
+
+        // Record audit trail event
+        if (storage.recordAuditEvent) {
+          try {
+            await storage.recordAuditEvent({
+              action: 'INVOICE_CREATED',
+              actor: {
+                type: 'seller',
+                id: invoice.sellerPublicKey,
+                ip: req.ip,
+                userAgent: getUserAgent(req),
+              },
+              scope: {
+                entityType: 'invoice',
+                entityId: invoice.id,
+              },
+              reason: 'Seller created invoice',
+              afterState: invoice,
+              metadata: {
+                amount: invoice.amount,
+                assetCode: invoice.assetCode,
+                assetIssuer: invoice.assetIssuer,
+                memo: invoice.memo,
+                expiresAt: invoice.expiresAt,
+              },
+              correlationId: corrId,
+            });
+          } catch (auditErr) {
+            console.error('Audit log error on invoice creation:', auditErr);
+          }
+        }
+
+        // Telemetry & Funnel
+        const duration = performance.now() - start;
+        metrics.recordOperation({
+          operation: 'invoice.create',
+          actor_type: 'seller',
+          result: 'success',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 201,
+          metadata: { invoiceId: invoice.id, amount: invoice.amount, assetCode: invoice.assetCode },
+        });
+        metrics.recordFunnelStage('invoice_created');
 
         sendSuccess(res, 201, {
           invoice,
@@ -123,32 +186,107 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           stellarQrCode: payment.stellarQrCode,
         });
       } catch (error: any) {
+        const duration = performance.now() - start;
         logError('Create invoice error:', error);
-        sendFailure(res, 400, error.message || 'Failed to create invoice');
+        const classified = classifyError(error);
+
+        metrics.recordOperation({
+          operation: 'invoice.create',
+          actor_type: 'seller',
+          result: 'failure',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 400,
+          error_code: classified.code,
+        });
+
+        sendFailure(res, 400, error.message || 'Failed to create invoice', {
+          code: classified.code,
+          correlationId: corrId,
+        });
       }
     },
 
     async getInvoice(req: Request, res: Response) {
+      const start = performance.now();
+      const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
+
       try {
         const invoice = await storage.getInvoiceById(req.params.id);
 
         if (!invoice) {
-          return sendFailure(res, 404, 'Invoice not found');
+          const duration = performance.now() - start;
+          metrics.recordOperation({
+            operation: 'invoice.get',
+            actor_type: 'anonymous',
+            result: 'failure',
+            latency_ms: duration,
+            correlation_id: corrId,
+            http_status: 404,
+            error_code: 'INVOICE_NOT_FOUND',
+          });
+          return sendFailure(res, 404, 'Invoice not found', {
+            code: 'INVOICE_NOT_FOUND',
+            correlationId: corrId,
+          });
         }
+
+        const duration = performance.now() - start;
+        metrics.recordOperation({
+          operation: 'invoice.get',
+          actor_type: 'anonymous',
+          result: 'success',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 200,
+          metadata: { invoiceId: invoice.id, status: invoice.status },
+        });
 
         sendSuccess(res, 200, invoice);
       } catch (error: any) {
+        const duration = performance.now() - start;
         logError('Get invoice error:', error);
-        sendFailure(res, 500, error.message || 'Failed to get invoice');
+        const classified = classifyError(error);
+
+        metrics.recordOperation({
+          operation: 'invoice.get',
+          actor_type: 'anonymous',
+          result: 'failure',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 500,
+          error_code: classified.code,
+        });
+
+        sendFailure(res, 500, error.message || 'Failed to get invoice', {
+          code: classified.code,
+          correlationId: corrId,
+        });
       }
     },
 
     async getInvoices(req: Request, res: Response) {
+      const start = performance.now();
+      const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
+
       try {
         const { status, sellerPublicKey } = req.query;
 
         if (!sellerPublicKey) {
-          return sendFailure(res, 400, 'sellerPublicKey query parameter is required');
+          const duration = performance.now() - start;
+          metrics.recordOperation({
+            operation: 'invoice.list',
+            actor_type: 'seller',
+            result: 'failure',
+            latency_ms: duration,
+            correlation_id: corrId,
+            http_status: 400,
+            error_code: 'SELLER_REQUIRED',
+          });
+          return sendFailure(res, 400, 'sellerPublicKey query parameter is required', {
+            code: 'SELLER_REQUIRED',
+            correlationId: corrId,
+          });
         }
 
         const limit = toPositiveInt(req.query.limit, 50);
@@ -161,66 +299,242 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           offset
         );
 
+        const duration = performance.now() - start;
+        metrics.recordOperation({
+          operation: 'invoice.list',
+          actor_type: 'seller',
+          result: 'success',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 200,
+          metadata: { sellerPublicKey, count: invoices.length, limit, offset },
+        });
+
         sendSuccess(res, 200, invoices, {
           pagination: { limit, offset, total: invoices.length },
         });
       } catch (error: any) {
+        const duration = performance.now() - start;
         logError('Get invoices error:', error);
-        sendFailure(res, 500, error.message || 'Failed to get invoices');
+        const classified = classifyError(error);
+
+        metrics.recordOperation({
+          operation: 'invoice.list',
+          actor_type: 'seller',
+          result: 'failure',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 500,
+          error_code: classified.code,
+        });
+
+        sendFailure(res, 500, error.message || 'Failed to get invoices', {
+          code: classified.code,
+          correlationId: corrId,
+        });
       }
     },
 
     async getPaymentInfo(req: Request, res: Response) {
+      const start = performance.now();
+      const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
+
       try {
         const invoice = await storage.getInvoiceById(req.params.id);
 
         if (!invoice) {
-          return sendFailure(res, 404, 'Invoice not found');
+          const duration = performance.now() - start;
+          metrics.recordOperation({
+            operation: 'invoice.get_payment_info',
+            actor_type: 'payer',
+            result: 'failure',
+            latency_ms: duration,
+            correlation_id: corrId,
+            http_status: 404,
+            error_code: 'INVOICE_NOT_FOUND',
+          });
+          return sendFailure(res, 404, 'Invoice not found', {
+            code: 'INVOICE_NOT_FOUND',
+            correlationId: corrId,
+          });
         }
 
         const payment = await buildPaymentPayload(invoice);
+        const duration = performance.now() - start;
+
+        metrics.recordOperation({
+          operation: 'invoice.get_payment_info',
+          actor_type: 'payer',
+          result: 'success',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 200,
+          metadata: { invoiceId: invoice.id, status: invoice.status },
+        });
+        metrics.recordFunnelStage('payment_page_viewed');
 
         sendSuccess(res, 200, { ...payment, invoice });
       } catch (error: any) {
+        const duration = performance.now() - start;
         logError('Get payment info error:', error);
-        sendFailure(res, 500, error.message || 'Failed to get payment info');
+        const classified = classifyError(error);
+
+        metrics.recordOperation({
+          operation: 'invoice.get_payment_info',
+          actor_type: 'payer',
+          result: 'failure',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 500,
+          error_code: classified.code,
+        });
+
+        sendFailure(res, 500, error.message || 'Failed to get payment info', {
+          code: classified.code,
+          correlationId: corrId,
+        });
       }
     },
 
     async cancelInvoice(req: Request, res: Response) {
+      const start = performance.now();
+      const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
+
       try {
+        const originalInvoice = await storage.getInvoiceById(req.params.id);
         const invoice = await storage.cancelInvoice(req.params.id);
+
+        // Record audit trail event
+        if (storage.recordAuditEvent) {
+          try {
+            await storage.recordAuditEvent({
+              action: 'INVOICE_CANCELLED',
+              actor: {
+                type: 'seller',
+                id: invoice.sellerPublicKey,
+                ip: req.ip,
+                userAgent: getUserAgent(req),
+              },
+              scope: {
+                entityType: 'invoice',
+                entityId: invoice.id,
+              },
+              reason: 'Seller cancelled invoice',
+              beforeState: originalInvoice,
+              afterState: invoice,
+              correlationId: corrId,
+            });
+          } catch (auditErr) {
+            console.error('Audit log error on invoice cancel:', auditErr);
+          }
+        }
+
+        const duration = performance.now() - start;
+        metrics.recordOperation({
+          operation: 'invoice.cancel',
+          actor_type: 'seller',
+          result: 'success',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 200,
+          metadata: { invoiceId: invoice.id },
+        });
+
         sendSuccess(res, 200, invoice);
       } catch (error: any) {
+        const duration = performance.now() - start;
         logError('Cancel invoice error:', error);
-        sendFailure(res, 400, error.message || 'Failed to cancel invoice');
+        const classified = classifyError(error);
+
+        metrics.recordOperation({
+          operation: 'invoice.cancel',
+          actor_type: 'seller',
+          result: 'failure',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 400,
+          error_code: classified.code,
+        });
+
+        sendFailure(res, 400, error.message || 'Failed to cancel invoice', {
+          code: classified.code,
+          correlationId: corrId,
+        });
       }
     },
 
     async verifyPayment(req: Request, res: Response) {
+      const start = performance.now();
+      const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
+
       try {
         const { id } = req.params;
         const { network } = req.body || {};
 
+        metrics.recordFunnelStage('payment_initiated');
+
         const hashCheck = checkTxHash(req.body?.txHash);
         if (!hashCheck.ok) {
-          return sendVerificationFailure(res, 400, hashCheck.code, hashCheck.error);
+          const duration = performance.now() - start;
+          metrics.recordOperation({
+            operation: 'invoice.verify_payment',
+            actor_type: 'payer',
+            result: 'failure',
+            latency_ms: duration,
+            correlation_id: corrId,
+            http_status: 400,
+            error_code: hashCheck.code,
+          });
+          return sendVerificationFailure(res, 400, hashCheck.code, hashCheck.error, corrId);
         }
 
         const payerCheck = checkPayerInfo(req.body);
         if (!payerCheck.ok) {
-          return sendVerificationFailure(res, 400, payerCheck.code, payerCheck.error);
+          const duration = performance.now() - start;
+          metrics.recordOperation({
+            operation: 'invoice.verify_payment',
+            actor_type: 'payer',
+            result: 'failure',
+            latency_ms: duration,
+            correlation_id: corrId,
+            http_status: 400,
+            error_code: payerCheck.code,
+          });
+          return sendVerificationFailure(res, 400, payerCheck.code, payerCheck.error, corrId);
         }
 
         const invoice = await storage.getInvoiceById(id);
 
         if (!invoice) {
-          return sendFailure(res, 404, 'Invoice not found');
+          const duration = performance.now() - start;
+          metrics.recordOperation({
+            operation: 'invoice.verify_payment',
+            actor_type: 'payer',
+            result: 'failure',
+            latency_ms: duration,
+            correlation_id: corrId,
+            http_status: 404,
+            error_code: 'INVOICE_NOT_FOUND',
+          });
+          return sendFailure(res, 404, 'Invoice not found', {
+            code: 'INVOICE_NOT_FOUND',
+            correlationId: corrId,
+          });
         }
 
         const statusCheck = checkInvoiceIsPayable(invoice.status);
         if (!statusCheck.ok) {
-          return sendVerificationFailure(res, 400, statusCheck.code, statusCheck.error);
+          const duration = performance.now() - start;
+          metrics.recordOperation({
+            operation: 'invoice.verify_payment',
+            actor_type: 'payer',
+            result: 'failure',
+            latency_ms: duration,
+            correlation_id: corrId,
+            http_status: 400,
+            error_code: statusCheck.code,
+          });
+          return sendVerificationFailure(res, 400, statusCheck.code, statusCheck.error, corrId);
         }
 
         let txDetails;
@@ -228,11 +542,22 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           txDetails = await stellar.getTransaction(hashCheck.value);
         } catch (error: any) {
           logError('Verify payment lookup error:', error);
+          const duration = performance.now() - start;
+          metrics.recordOperation({
+            operation: 'invoice.verify_payment',
+            actor_type: 'payer',
+            result: 'failure',
+            latency_ms: duration,
+            correlation_id: corrId,
+            http_status: 404,
+            error_code: 'TRANSACTION_NOT_FOUND',
+          });
           return sendVerificationFailure(
             res,
             404,
             'TRANSACTION_NOT_FOUND',
-            VERIFICATION_MESSAGES.TRANSACTION_NOT_FOUND
+            VERIFICATION_MESSAGES.TRANSACTION_NOT_FOUND,
+            corrId
           );
         }
 
@@ -252,7 +577,17 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         });
 
         if (!verification.ok) {
-          return sendVerificationFailure(res, 400, verification.code, verification.error);
+          const duration = performance.now() - start;
+          metrics.recordOperation({
+            operation: 'invoice.verify_payment',
+            actor_type: 'payer',
+            result: 'failure',
+            latency_ms: duration,
+            correlation_id: corrId,
+            http_status: 400,
+            error_code: verification.code,
+          });
+          return sendVerificationFailure(res, 400, verification.code, verification.error, corrId);
         }
 
         let updatedInvoice: StoredInvoice;
@@ -269,56 +604,190 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           const latest = await storage.getInvoiceById(id);
           const latestStatus = latest && checkInvoiceIsPayable(latest.status);
           if (latestStatus && !latestStatus.ok) {
+            const duration = performance.now() - start;
+            metrics.recordOperation({
+              operation: 'invoice.verify_payment',
+              actor_type: 'payer',
+              result: 'failure',
+              latency_ms: duration,
+              correlation_id: corrId,
+              http_status: 400,
+              error_code: latestStatus.code,
+            });
             return sendVerificationFailure(
               res,
               400,
               latestStatus.code,
-              latestStatus.error
+              latestStatus.error,
+              corrId
             );
           }
           throw error;
         }
 
-        sendSuccess(res, 200, updatedInvoice, { message: 'Payment verified on Stellar' });
+        // Record audit trail event for verified settlement
+        if (storage.recordAuditEvent) {
+          try {
+            await storage.recordAuditEvent({
+              action: 'PAYMENT_VERIFIED',
+              actor: {
+                type: 'payer',
+                id: verification.value.from,
+                ip: req.ip,
+                userAgent: getUserAgent(req),
+              },
+              scope: {
+                entityType: 'invoice',
+                entityId: invoice.id,
+              },
+              reason: 'Payment verified on Horizon against invoice requirements',
+              beforeState: invoice,
+              afterState: updatedInvoice,
+              metadata: {
+                txHash: verification.value.txHash,
+                payerPublicKey: verification.value.from,
+                amount: invoice.amount,
+                assetCode: invoice.assetCode,
+                assetIssuer: invoice.assetIssuer,
+                memo: invoice.memo,
+                settledAt: updatedInvoice.paidAt,
+              },
+              correlationId: corrId,
+            });
+          } catch (auditErr) {
+            console.error('Audit log error on payment verify:', auditErr);
+          }
+        }
+
+        // Telemetry & Funnel Success
+        const duration = performance.now() - start;
+        metrics.recordOperation({
+          operation: 'invoice.verify_payment',
+          actor_type: 'payer',
+          result: 'success',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 200,
+          metadata: {
+            invoiceId: updatedInvoice.id,
+            txHash: verification.value.txHash,
+            payer: verification.value.from,
+          },
+        });
+        metrics.recordFunnelStage('payment_verified');
+
+        sendSuccess(res, 200, updatedInvoice, {
+          message: 'Payment verified on Stellar',
+          correlationId: corrId,
+        });
       } catch (error: any) {
+        const duration = performance.now() - start;
         logError('Verify payment error:', error);
-        sendFailure(res, 500, error.message || 'Failed to verify payment');
+        const classified = classifyError(error);
+
+        metrics.recordOperation({
+          operation: 'invoice.verify_payment',
+          actor_type: 'payer',
+          result: 'failure',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 500,
+          error_code: classified.code,
+        });
+
+        sendFailure(res, 500, error.message || 'Failed to verify payment', {
+          code: classified.code,
+          correlationId: corrId,
+        });
       }
     },
 
     async getStats(req: Request, res: Response) {
+      const start = performance.now();
+      const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
+
       try {
         const { sellerPublicKey } = req.query;
 
         if (!sellerPublicKey) {
-          return sendFailure(res, 400, 'sellerPublicKey query parameter is required');
+          const duration = performance.now() - start;
+          metrics.recordOperation({
+            operation: 'invoice.get_stats',
+            actor_type: 'seller',
+            result: 'failure',
+            latency_ms: duration,
+            correlation_id: corrId,
+            http_status: 400,
+            error_code: 'SELLER_REQUIRED',
+          });
+          return sendFailure(res, 400, 'sellerPublicKey query parameter is required', {
+            code: 'SELLER_REQUIRED',
+            correlationId: corrId,
+          });
         }
 
         const stats = await storage.getInvoiceStats(sellerPublicKey as string);
+        const duration = performance.now() - start;
+
+        metrics.recordOperation({
+          operation: 'invoice.get_stats',
+          actor_type: 'seller',
+          result: 'success',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 200,
+          metadata: { sellerPublicKey },
+        });
+
         sendSuccess(res, 200, stats);
       } catch (error: any) {
+        const duration = performance.now() - start;
         logError('Get stats error:', error);
-        sendFailure(res, 500, error.message || 'Failed to get statistics');
+        const classified = classifyError(error);
+
+        metrics.recordOperation({
+          operation: 'invoice.get_stats',
+          actor_type: 'seller',
+          result: 'failure',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 500,
+          error_code: classified.code,
+        });
+
+        sendFailure(res, 500, error.message || 'Failed to get statistics', {
+          code: classified.code,
+          correlationId: corrId,
+        });
       }
     },
 
     // Local testing only — hidden unless ALLOW_SIMULATE=true.
     async simulatePayment(req: Request, res: Response) {
+      const start = performance.now();
+      const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
+
       try {
         if (!simulateAllowed()) {
-          return sendFailure(res, 404, 'Endpoint not found');
+          return sendFailure(res, 404, 'Endpoint not found', {
+            code: 'NOT_FOUND',
+            correlationId: corrId,
+          });
         }
 
         const { id } = req.params;
         const invoice = await storage.getInvoiceById(id);
 
         if (!invoice) {
-          return sendFailure(res, 404, 'Invoice not found');
+          return sendFailure(res, 404, 'Invoice not found', {
+            code: 'INVOICE_NOT_FOUND',
+            correlationId: corrId,
+          });
         }
 
         const statusCheck = checkInvoiceIsPayable(invoice.status);
         if (!statusCheck.ok) {
-          return sendVerificationFailure(res, 400, statusCheck.code, statusCheck.error);
+          return sendVerificationFailure(res, 400, statusCheck.code, statusCheck.error, corrId);
         }
 
         const mockTxHash = `MOCK_TX_${Date.now().toString(36).toUpperCase()}_${Math.random()
@@ -329,10 +798,164 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
 
         const updatedInvoice = await storage.markAsPaid(id, mockTxHash, mockPayerKey);
 
-        sendSuccess(res, 200, updatedInvoice, { message: 'Payment simulated successfully' });
+        // Audit simulation
+        if (storage.recordAuditEvent) {
+          try {
+            await storage.recordAuditEvent({
+              action: 'PAYMENT_SIMULATED',
+              actor: {
+                type: 'maintainer',
+                id: 'dev-simulator',
+                ip: req.ip,
+                userAgent: getUserAgent(req),
+              },
+              scope: {
+                entityType: 'invoice',
+                entityId: invoice.id,
+              },
+              reason: 'Payment simulated via dev API endpoint',
+              beforeState: invoice,
+              afterState: updatedInvoice,
+              metadata: { mockTxHash, mockPayerKey },
+              correlationId: corrId,
+            });
+          } catch (auditErr) {
+            console.error('Audit log error on payment simulation:', auditErr);
+          }
+        }
+
+        const duration = performance.now() - start;
+        metrics.recordOperation({
+          operation: 'invoice.simulate_payment',
+          actor_type: 'maintainer',
+          result: 'success',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 200,
+          metadata: { invoiceId: updatedInvoice.id, mockTxHash },
+        });
+
+        sendSuccess(res, 200, updatedInvoice, {
+          message: 'Payment simulated successfully',
+          correlationId: corrId,
+        });
       } catch (error: any) {
         logError('Simulate payment error:', error);
-        sendFailure(res, 500, error.message || 'Failed to simulate payment');
+        sendFailure(res, 500, error.message || 'Failed to simulate payment', {
+          correlationId: corrId,
+        });
+      }
+    },
+
+    // Audit Trail for a specific invoice
+    async getInvoiceAuditTrail(req: Request, res: Response) {
+      try {
+        const { id } = req.params;
+        const events = storage.getAuditEventsByInvoice
+          ? await storage.getAuditEventsByInvoice(id)
+          : [];
+
+        sendSuccess(res, 200, events, {
+          pagination: { limit: events.length, offset: 0, total: events.length },
+        });
+      } catch (error: any) {
+        logError('Get invoice audit trail error:', error);
+        sendFailure(res, 500, error.message || 'Failed to get audit trail');
+      }
+    },
+
+    // Maintainer query for audit events
+    async getAuditEvents(req: Request, res: Response) {
+      try {
+        const { action, entityId, actorId, actorType, fromTimestamp, toTimestamp, limit, offset } =
+          req.query;
+
+        const filter = {
+          action: action as AuditAction | undefined,
+          entityId: entityId as string | undefined,
+          actorId: actorId as string | undefined,
+          actorType: actorType as any,
+          fromTimestamp: fromTimestamp as string | undefined,
+          toTimestamp: toTimestamp as string | undefined,
+          limit: limit ? toPositiveInt(limit, 50) : undefined,
+          offset: offset ? toPositiveInt(offset, 0) : undefined,
+        };
+
+        const result = storage.getAuditEvents
+          ? await storage.getAuditEvents(filter)
+          : { events: [], total: 0, limit: 50, offset: 0 };
+
+        sendSuccess(res, 200, result.events, {
+          pagination: { limit: result.limit, offset: result.offset, total: result.total },
+        });
+      } catch (error: any) {
+        logError('Query audit events error:', error);
+        sendFailure(res, 500, error.message || 'Failed to query audit events');
+      }
+    },
+
+    // Maintainer export for audit events (JSON, NDJSON, CSV)
+    async exportAuditTrail(req: Request, res: Response) {
+      try {
+        const { format = 'json', action, entityId, actorId } = req.query;
+        const result = storage.getAuditEvents
+          ? await storage.getAuditEvents({
+              action: action as AuditAction | undefined,
+              entityId: entityId as string | undefined,
+              actorId: actorId as string | undefined,
+              limit: 500,
+            })
+          : { events: [], total: 0, limit: 500, offset: 0 };
+
+        const exportFormat = (String(format).toLowerCase() === 'csv'
+          ? 'csv'
+          : String(format).toLowerCase() === 'ndjson'
+          ? 'ndjson'
+          : 'json') as 'json' | 'ndjson' | 'csv';
+
+        const output = exportAuditEvents(result.events, exportFormat);
+
+        if (exportFormat === 'csv') {
+          res.setHeader('Content-Type', 'text/csv');
+          res.setHeader('Content-Disposition', 'attachment; filename="quittance-audit-trail.csv"');
+          res.status(200).send(output);
+          return;
+        }
+
+        if (exportFormat === 'ndjson') {
+          res.setHeader('Content-Type', 'application/x-ndjson');
+          res.status(200).send(output);
+          return;
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.status(200).send(output);
+      } catch (error: any) {
+        logError('Export audit trail error:', error);
+        sendFailure(res, 500, error.message || 'Failed to export audit trail');
+      }
+    },
+
+    // Observability JSON metrics summary
+    async getObservabilityMetrics(_req: Request, res: Response) {
+      try {
+        const summary = metrics.getMetricsSummary();
+        sendSuccess(res, 200, summary);
+      } catch (error: any) {
+        logError('Observability metrics error:', error);
+        sendFailure(res, 500, error.message || 'Failed to get metrics');
+      }
+    },
+
+    // Prometheus plain text metrics
+    async getPrometheusMetrics(_req: Request, res: Response) {
+      try {
+        const prometheusOutput = metrics.exportPrometheusMetrics();
+        res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+        res.status(200).send(prometheusOutput);
+      } catch (error: any) {
+        logError('Prometheus metrics error:', error);
+        res.status(500).send('# Error exporting metrics');
       }
     },
   };

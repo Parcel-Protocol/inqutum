@@ -1,10 +1,9 @@
 /**
- * Client mirror of the canonical verification contract (issue #224).
+ * Client mirror of the canonical verification contract (issue #224) and Error Taxonomy (issue #48).
  *
- * The authority is `backend/src/services/payment-verification.ts`; this file
- * exists so the pay flow can reject malformed input before a round trip and
- * surface the exact code/message the server would return. Keep the codes and
- * messages here identical to the backend module.
+ * The authority is `backend/src/services/payment-verification.ts` and `backend/src/errors/error-taxonomy.ts`;
+ * this file exists so the pay flow can reject malformed input before a round trip and
+ * surface the exact code/message/recovery guidance the server would return.
  */
 
 const VERIFICATION_MESSAGES = {
@@ -25,6 +24,24 @@ const VERIFICATION_MESSAGES = {
   NETWORK_MISMATCH: 'Transaction is on a different Stellar network',
 };
 
+const RECOVERY_ACTIONS = {
+  MISSING_TX_HASH: 'Provide a 64-character transaction hash from your Stellar wallet after submitting payment.',
+  INVALID_TX_HASH: 'Verify that the transaction hash contains exactly 64 hexadecimal characters.',
+  INVALID_PAYER_NAME: 'Enter a valid text string for the payer name or leave it empty.',
+  INVALID_PAYER_EMAIL: 'Enter a valid email address (e.g. name@domain.com) or leave it empty.',
+  PAYER_INFO_TOO_LONG: 'Shorten payer name and email to under 255 characters.',
+  INVOICE_ALREADY_PAID: 'This invoice is already settled. You can download or email your quittance proof.',
+  INVOICE_EXPIRED: 'The payment window has elapsed. Contact the seller to issue a new invoice.',
+  INVOICE_NOT_PENDING: 'Only pending invoices can accept payment. Check invoice status on dashboard.',
+  TRANSACTION_NOT_FOUND: 'Stellar ledger close takes ~5 seconds. Please wait a moment and retry verification.',
+  NO_PAYMENT_OPERATION: 'Ensure your transaction contains a direct payment operation to the seller address.',
+  MEMO_MISMATCH: 'Include the exact invoice memo in your transaction memo field before sending.',
+  DESTINATION_MISMATCH: 'Send funds directly to the seller public key specified in the invoice.',
+  AMOUNT_MISMATCH: 'Send the exact invoice amount (matched at Stellar 7-decimal stroop precision).',
+  ASSET_MISMATCH: 'Pay with the designated asset. For non-native tokens, verify both asset code and issuer.',
+  NETWORK_MISMATCH: 'Switch your Freighter wallet to the matching Stellar network (Testnet or Public).',
+};
+
 const MAX_PAYER_FIELD_LENGTH = 255;
 const PAYER_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TX_HASH_PATTERN = /^[0-9a-f]{64}$/i;
@@ -35,6 +52,7 @@ const failure = (code) => ({
   ok: false,
   code,
   error: VERIFICATION_MESSAGES[code],
+  recoveryAction: RECOVERY_ACTIONS[code],
 });
 
 /** A Stellar transaction hash is 64 hexadecimal characters. */
@@ -100,12 +118,35 @@ const resolveVerificationError = (error, fallback = 'Verification failed') => {
   return data.error || (error && error.message) || fallback;
 };
 
+/**
+ * Resolve full user-safe error details including recovery guidance and correlation ID.
+ */
+const resolveUserSafeError = (error, fallback = 'An unexpected error occurred') => {
+  const data = (error && error.response && error.response.data) || {};
+  const code = data.code || (error && error.code);
+  const message = (code && VERIFICATION_MESSAGES[code]) || data.error || (error && error.message) || fallback;
+  const recoveryAction = (code && RECOVERY_ACTIONS[code]) || data.recoveryAction || 'Please check your input and retry.';
+  const retryable = data.retryable !== undefined ? data.retryable : (code === 'TRANSACTION_NOT_FOUND' || data.category === 'NETWORK');
+  const correlationId = data.correlationId || (error && error.correlationId);
+
+  return {
+    code,
+    message,
+    category: data.category || 'SETTLEMENT',
+    retryable,
+    recoveryAction,
+    correlationId,
+  };
+};
+
 module.exports = {
   VERIFICATION_MESSAGES,
+  RECOVERY_ACTIONS,
   failure,
   isValidTxHash,
   normalizeTransactionHash,
   checkTxHash,
   checkPayerInfo,
   resolveVerificationError,
+  resolveUserSafeError,
 };

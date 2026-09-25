@@ -2,6 +2,7 @@ import { InvoiceMemoryService } from '../services/invoice-memory.service';
 import { CreateInvoiceInput } from '../utils/validation';
 import type { InvoiceStats } from './invoice-stats';
 import type { InvoiceStorage, PayerInfo, StoredInvoice } from './invoice-storage';
+import { auditStore, AuditEvent, AuditFilter, AuditQueryResult } from '../audit/audit-service';
 
 export class MemoryInvoiceStorage implements InvoiceStorage {
   readonly mode = 'in-memory';
@@ -45,6 +46,18 @@ export class MemoryInvoiceStorage implements InvoiceStorage {
 
   async markExpiredInvoices(now?: Date): Promise<number> {
     return this.service.markExpiredInvoices(now);
+  }
+
+  async recordAuditEvent(event: Omit<AuditEvent, 'id' | 'timestamp'> & { timestamp?: string }): Promise<AuditEvent> {
+    return auditStore.recordEvent(event);
+  }
+
+  async getAuditEvents(filter?: AuditFilter): Promise<AuditQueryResult> {
+    return auditStore.queryEvents(filter);
+  }
+
+  async getAuditEventsByInvoice(invoiceId: string): Promise<AuditEvent[]> {
+    return auditStore.getEventsByEntity(invoiceId);
   }
 }
 
