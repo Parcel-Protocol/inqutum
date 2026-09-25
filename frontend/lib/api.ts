@@ -1,6 +1,20 @@
 import axios from 'axios';
+import { mockInvoiceApi, mockStellarApi, mockHealthCheck } from './mock-api';
+import {
+  ApiUnavailableError,
+  apiErrorMessage,
+  isApiUnavailableError,
+  resolveApiConfig,
+  toApiError,
+} from './api-runtime';
+import { resolveVerificationError } from './verification';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+const USE_MOCK_API = process.env.NEXT_PUBLIC_USE_MOCK === 'true';
+export const API_CONFIG = resolveApiConfig(
+  process.env.NEXT_PUBLIC_API_URL,
+  process.env.NODE_ENV
+);
+export const PAYMENT_STATUS_POLL_INTERVAL_MS = 3000;
 
 const api = axios.create({
   baseURL: API_CONFIG.baseUrl,
@@ -19,7 +33,37 @@ api.interceptors.response.use(
   }
 );
 
-export const invoiceApi = {
+/**
+ * Turns a failed request into an English sentence for a live region.
+ *
+ * A failed load used to reach the user only as a toast, which disappears, and
+ * as a console entry, which does not reach them at all, so a page that failed
+ * to load simply stayed blank for a screen-reader user (issue #289). The status
+ * regions on the pages read this instead.
+ *
+ * The backend's own wording is preferred because it is the most specific thing
+ * available; this mirrors `describeVerifyError` in `payment-page-state.js`,
+ * which does the same for the verify endpoint.
+ */
+export function describeApiError(error: any, fallback = 'Something went wrong.'): string {
+  const serverMessage = error?.response?.data?.error;
+  if (typeof serverMessage === 'string' && serverMessage.trim()) {
+    return serverMessage;
+  }
+
+  if (error?.response?.status === 404) {
+    return 'Not found.';
+  }
+
+  const transportMessage = error?.message;
+  if (typeof transportMessage === 'string' && transportMessage.trim()) {
+    return transportMessage;
+  }
+
+  return fallback;
+}
+
+export const invoiceApi = USE_MOCK_API ? mockInvoiceApi : {
   create: async (data: {
     amount: number;
     assetCode?: string;
@@ -87,7 +131,7 @@ export const invoiceApi = {
 };
 
 // Stellar APIs
-export const stellarApi = {
+export const stellarApi = USE_MOCK_API ? mockStellarApi : {
   getAccount: async (publicKey?: string) => {
     const response = await api.get('/stellar/account', {
       params: { publicKey },
@@ -118,7 +162,10 @@ export const stellarApi = {
 };
 
 // Health check
-export const healthCheck = async () => {
+export const healthCheck = USE_MOCK_API ? mockHealthCheck : async () => {
+  if (!API_CONFIG.configured) {
+    throw new ApiUnavailableError(API_CONFIG.error || undefined);
+  }
   const response = await api.get('/health');
   return response.data;
 };

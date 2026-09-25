@@ -46,21 +46,6 @@ const FREIGHTER_WRONG_NETWORK_MESSAGE = (targetNetwork = 'Testnet') =>
   `Your Freighter wallet is connected to the wrong network. Please switch to ${targetNetwork} in Freighter.`;
 
 /**
- * Treat a failed connection check as unavailable. This covers browsers where
- * the extension API is absent as well as extension injection failures.
- *
- * @param {() => Promise<boolean>} checkConnection
- * @returns {Promise<boolean>}
- */
-const detectFreighter = async (checkConnection) => {
-  try {
-    return normalizeFreighterBoolean(await checkConnection(), 'isConnected');
-  } catch {
-    return false;
-  }
-};
-
-/**
  * Checks if a network string or passphrase matches the expected network
  *
  * @param {string} [networkOrPassphrase]
@@ -77,10 +62,74 @@ const isNetworkMatching = (networkOrPassphrase, expected = 'TESTNET') => {
   return false;
 };
 
+/**
+ * Treat a failed connection check as unavailable. This covers browsers where
+ * the extension API is absent as well as extension injection failures.
+ *
+ * @param {() => Promise<boolean>} checkConnection
+ * @returns {Promise<boolean>}
+ */
+const detectFreighter = async (checkConnection) => {
+  try {
+    return normalizeFreighterBoolean(await checkConnection(), 'isConnected');
+  } catch {
+    return false;
+  }
+};
+
+const walletGate = (session = {}, expectedNetwork = 'TESTNET') => {
+  if (session.freighterAvailable === false) {
+    return {
+      status: 'missing',
+      ready: false,
+      title: 'Install Freighter',
+      message: FREIGHTER_REQUIRED_MESSAGE,
+      action: 'install',
+    };
+  }
+
+  if (!session.connected || !session.publicKey) {
+    return {
+      status: 'disconnected',
+      ready: false,
+      title: 'Connect Freighter',
+      message: FREIGHTER_CONNECT_REQUIRED_MESSAGE,
+      action: 'connect',
+    };
+  }
+
+  if (!networkMatches(session.network, expectedNetwork)) {
+    return {
+      status: 'wrong_network',
+      ready: false,
+      title: 'Switch Freighter network',
+      message: wrongNetworkMessage(expectedNetwork, session.network),
+      action: 'switch_network',
+    };
+  }
+
+  return {
+    status: 'ready',
+    ready: true,
+    title: 'Freighter connected',
+    message: FREIGHTER_READY_MESSAGE,
+    action: 'continue',
+  };
+};
+
 module.exports = {
   FREIGHTER_INSTALL_URL,
   FREIGHTER_REQUIRED_MESSAGE,
   FREIGHTER_WRONG_NETWORK_MESSAGE,
-  detectFreighter,
   isNetworkMatching,
+  FREIGHTER_CONNECT_REQUIRED_MESSAGE,
+  FREIGHTER_READY_MESSAGE,
+  NETWORK_LABELS,
+  detectFreighter,
+  normalizeFreighterBoolean,
+  normalizeNetworkName,
+  networkLabel,
+  networkMatches,
+  walletGate,
+  wrongNetworkMessage,
 };
