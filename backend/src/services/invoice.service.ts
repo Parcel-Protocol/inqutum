@@ -41,6 +41,7 @@ export interface Invoice {
   paidAt?: Date;
   expiresAt: Date;
   metadata?: any;
+  externalId?: string;
 }
 
 export class InvoiceService {
@@ -58,30 +59,31 @@ export class InvoiceService {
     const memo = generateInvoiceMemo();
     const expiresAt = calculateInvoiceExpiry(input.expiresInDays);
 
-    const query = `
+      const query = `
       INSERT INTO invoices (
         id, seller_public_key, seller_name, seller_email, amount,
         asset_code, asset_issuer, memo, description, customer_name,
-        customer_email, status, expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        customer_email, status, expires_at, external_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING *
     `;
 
-    const values = [
-      id,
-      input.sellerPublicKey,
-      input.sellerName || null,
-      input.sellerEmail || null,
-      input.amount,
-      input.assetCode || 'XLM',
-      input.assetIssuer || null,
-      memo,
-      input.description || null,
-      input.customerName || null,
-      input.customerEmail || null,
-      'PENDING',
-      expiresAt,
-    ];
+      const values = [
+        id,
+        input.sellerPublicKey,
+        input.sellerName || null,
+        input.sellerEmail || null,
+        input.amount,
+        input.assetCode || 'XLM',
+        input.assetIssuer || null,
+        memo,
+        input.description || null,
+        input.customerName || null,
+        input.customerEmail || null,
+        'PENDING',
+        expiresAt,
+        input.externalId || null,
+      ];
 
     try {
       const result = await this.db.query(query, values);
@@ -115,6 +117,75 @@ export class InvoiceService {
     await this.markExpiredInvoices();
     const query = 'SELECT * FROM invoices WHERE memo = $1';
     const result = await this.db.query(query, [memo]);
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return this.mapRowToInvoice(result.rows[0]);
+  }
+
+  /**
+   * Get invoice by caller-supplied import key (issue #53).
+   *
+   * Deliberately does NOT call `markExpiredInvoices()`. Import dry runs call
+   * this once per row and must leave storage untouched, and the lazy expiry
+   * transition is a write. Callers that want the transition applied should
+   * use `getInvoiceById`/`getInvoiceByMemo` instead.
+   */
+  async getInvoiceByExternalId(externalId: string): Promise<Invoice | null> {
+    const query = 'SELECT * FROM invoices WHERE external_id = $1';
+    const result = await this.db.query(query, [externalId]);
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return this.mapRowToInvoice(result.rows[0]);
+  }
+
+  /**
+   * Patch the descriptive fields of an invoice (issue #53).
+   *
+   * Amount, asset, seller, status and payment columns are intentionally not
+   * writable here: a bulk re-import must not be able to rewrite a settled
+   * invoice or move it to a different seller. Absent keys in `patch` are left
+   * as they are.
+   */
+  async updateInvoiceMutableFields(
+    id: string,
+    patch: {
+      description?: string;
+      customerName?: string;
+      customerEmail?: string;
+      sellerName?: string;
+      sellerEmail?: string;
+    }
+  ): Promise<Invoice | null> {
+    const columns: Record<string, string> = {
+      description: 'description',
+      customerName: 'customer_name',
+      customerEmail: 'customer_email',
+      sellerName: 'seller_name',
+      sellerEmail: 'seller_email',
+    };
+
+    const assignments: string[] = [];
+    const values: any[] = [id];
+    for (const [field, column] of Object.entries(columns)) {
+      const value = (patch as Record<string, unknown>)[field];
+      if (value === undefined) continue;
+      values.push(value);
+      assignments.push(`${column} = $${values.length}`);
+    }
+
+    // Nothing to change: report the current row rather than issuing no-op SQL.
+    if (assignments.length === 0) {
+      return this.getInvoiceById(id);
+    }
+
+    const query = `UPDATE invoices SET ${assignments.join(', ')} WHERE id = $1 RETURNING *`;
+    const result = await this.db.query(query, values);
 
     if (result.rows.length === 0) {
       return null;
@@ -362,6 +433,7 @@ export class InvoiceService {
       paidAt: row.paid_at,
       expiresAt: row.expires_at,
       metadata: row.metadata,
+      externalId: row.external_id ?? undefined,
     };
   }
 }

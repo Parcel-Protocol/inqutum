@@ -19,6 +19,23 @@ export class MemoryInvoiceStorage implements InvoiceStorage {
     return invoice ?? null;
   }
 
+  async getInvoiceByExternalId(externalId: string): Promise<StoredInvoice | null> {
+    return this.service.getInvoiceByExternalId(externalId);
+  }
+
+  async updateInvoiceMutableFields(
+    id: string,
+    patch: {
+      description?: string;
+      customerName?: string;
+      customerEmail?: string;
+      sellerName?: string;
+      sellerEmail?: string;
+    }
+  ): Promise<StoredInvoice | null> {
+    return this.service.updateInvoiceMutableFields(id, patch);
+  }
+
   async getInvoicesBySeller(
     sellerPublicKey: string,
     status?: string,

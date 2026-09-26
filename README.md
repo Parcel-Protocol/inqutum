@@ -236,7 +236,10 @@ npm run db:seed      # optional: sample invoices for two demo wallets
 
 - `db/schema.sql` — invoices, transactions, payment_events, `invoice_stats` view.
   Re-running it also drops the legacy `users` table and `invoices.user_id` column
-  from older databases.
+  from older databases, and adds `invoices.external_id` (nullable, uniquely
+  indexed where present) used by [bulk imports](./docs/IMPORTS.md). Both are
+  `IF NOT EXISTS`, so an existing database picks the column up on the next
+  `npm run db:migrate` with no manual `ALTER`.
 - `db/seed.sql` — invoices for two demo seller wallets so wallet scoping is
   visible locally. Swap a seed `seller_public_key` for your own Freighter address
   to see the rows in your dashboard.
@@ -370,7 +373,7 @@ how settlement compares them is documented in
 [`docs/ASSETS.md`](./docs/ASSETS.md) and [`docs/VERIFY.md`](./docs/VERIFY.md).
 Background jobs (retries, dead-letter queue, running workers): [`docs/JOBS.md`](./docs/JOBS.md).
 Accessibility conventions and checks: [`docs/ACCESSIBILITY.md`](./docs/ACCESSIBILITY.md).
-Notifications: [`docs/NOTIFICATIONS.md`](./docs/NOTIFICATIONS.md). Data exports: [`docs/EXPORTS.md`](./docs/EXPORTS.md). Untrusted content and URL handling: [`docs/CONTENT_SAFETY.md`](./docs/CONTENT_SAFETY.md).
+Notifications: [`docs/NOTIFICATIONS.md`](./docs/NOTIFICATIONS.md). Data exports: [`docs/EXPORTS.md`](./docs/EXPORTS.md). Bulk imports with dry run and rollback: [`docs/IMPORTS.md`](./docs/IMPORTS.md). Untrusted content and URL handling: [`docs/CONTENT_SAFETY.md`](./docs/CONTENT_SAFETY.md).
 
 ## Tests & CI
 

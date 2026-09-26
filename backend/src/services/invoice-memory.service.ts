@@ -30,6 +30,7 @@ export class InvoiceMemoryService {
       customerName: input.customerName,
       customerEmail: input.customerEmail,
       expiresAt,
+      externalId: input.externalId,
     });
 
     console.log('✅ Invoice created:', invoice.id);
@@ -43,6 +44,30 @@ export class InvoiceMemoryService {
 
   async getInvoiceByMemo(memo: string): Promise<StoredInvoice | null> {
     const invoice = this.storage.getInvoiceByMemo(memo);
+    return invoice ?? null;
+  }
+
+  /**
+   * Read-only import-key lookup (issue #53). Must not apply the lazy expiry
+   * transition, or an import dry run would write to storage.
+   */
+  async getInvoiceByExternalId(externalId: string): Promise<StoredInvoice | null> {
+    const invoice = this.storage.getInvoiceByExternalId(externalId);
+    return invoice ?? null;
+  }
+
+  /** Descriptive-field patch only (issue #53); mirrors the Postgres backend. */
+  async updateInvoiceMutableFields(
+    id: string,
+    patch: {
+      description?: string;
+      customerName?: string;
+      customerEmail?: string;
+      sellerName?: string;
+      sellerEmail?: string;
+    }
+  ): Promise<StoredInvoice | null> {
+    const invoice = this.storage.updateInvoiceMutableFields(id, patch);
     return invoice ?? null;
   }
 

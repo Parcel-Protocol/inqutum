@@ -37,6 +37,8 @@ export interface StoredInvoice {
   paidAt?: Date;
   expiresAt: Date;
   metadata?: any;
+  /** Caller-supplied import key (issue #53). Absent on API-created invoices. */
+  externalId?: string;
 }
 
 export interface PayerInfo {
@@ -62,6 +64,34 @@ export interface InvoiceStorage {
 
   createInvoice(input: CreateInvoiceInput): Promise<StoredInvoice>;
   getInvoiceById(id: string): Promise<StoredInvoice | null>;
+  /**
+   * Read-only lookup by import key (issue #53).
+   *
+   * Unlike `getInvoiceById`/`getInvoiceByMemo` this MUST NOT apply the lazy
+   * expiry transition: import dry runs resolve every row through this method
+   * and are required to perform no persistent writes, so a preview can never
+   * mutate the invoices it is previewing. Implementations must not call
+   * `markExpiredInvoices` here.
+   */
+  getInvoiceByExternalId(externalId: string): Promise<StoredInvoice | null>;
+  /**
+   * Patch only the descriptive fields of an existing invoice (issue #53).
+   *
+   * Financial and lifecycle columns are deliberately not patchable: `amount`,
+   * `assetCode`, `assetIssuer`, `sellerPublicKey`, `status` and the payment
+   * fields are either settled facts or security boundaries, so a re-import
+   * can never rewrite them. Returns null when the invoice does not exist.
+   */
+  updateInvoiceMutableFields(
+    id: string,
+    patch: {
+      description?: string;
+      customerName?: string;
+      customerEmail?: string;
+      sellerName?: string;
+      sellerEmail?: string;
+    }
+  ): Promise<StoredInvoice | null>;
   /**
    * Newest first by (createdAt, id). Pass `after` for keyset pagination;
    * `offset` is kept for older clients and is unstable under inserts.

@@ -9,6 +9,7 @@ type Invoice = StoredInvoice;
 class MemoryStorage {
   private invoices: Map<string, Invoice> = new Map();
   private invoicesByMemo: Map<string, string> = new Map(); // memo -> invoice id
+  private invoicesByExternalId: Map<string, string> = new Map(); // external_id -> invoice id (issue #53)
 
   createInvoice(data: Partial<Invoice>): Invoice {
     const invoice: Invoice = {
@@ -27,10 +28,14 @@ class MemoryStorage {
       createdAt: new Date(),
       expiresAt: data.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       metadata: data.metadata,
+      externalId: data.externalId,
     };
 
     this.invoices.set(invoice.id, invoice);
     this.invoicesByMemo.set(invoice.memo, invoice.id);
+    if (invoice.externalId) {
+      this.invoicesByExternalId.set(invoice.externalId, invoice.id);
+    }
 
     console.log('✅ Invoice created in memory:', invoice.id);
     return invoice;
@@ -47,6 +52,46 @@ class MemoryStorage {
     this.markExpiredInvoices();
     const id = this.invoicesByMemo.get(memo);
     return id ? this.invoices.get(id) : undefined;
+  }
+
+  /**
+   * Get invoice by import key (issue #53). Intentionally skips
+   * `markExpiredInvoices()` so import dry runs stay write-free, matching
+   * `getInvoiceByExternalId` on the Postgres backend.
+   */
+  getInvoiceByExternalId(externalId: string): Invoice | undefined {
+    const id = this.invoicesByExternalId.get(externalId);
+    return id ? this.invoices.get(id) : undefined;
+  }
+
+  /**
+   * Descriptive-field patch only (issue #53). Mirrors the Postgres backend:
+   * amount, asset, seller, status and payment columns are not patchable.
+   */
+  updateInvoiceMutableFields(
+    id: string,
+    patch: {
+      description?: string;
+      customerName?: string;
+      customerEmail?: string;
+      sellerName?: string;
+      sellerEmail?: string;
+    }
+  ): Invoice | undefined {
+    const allowed: Array<keyof typeof patch> = [
+      'description',
+      'customerName',
+      'customerEmail',
+      'sellerName',
+      'sellerEmail',
+    ];
+    const updates: Partial<Invoice> = {};
+    for (const field of allowed) {
+      if (patch[field] !== undefined) {
+        (updates as Record<string, unknown>)[field] = patch[field];
+      }
+    }
+    return this.updateInvoice(id, updates);
   }
 
   // Update invoice
@@ -131,6 +176,7 @@ class MemoryStorage {
   clear() {
     this.invoices.clear();
     this.invoicesByMemo.clear();
+    this.invoicesByExternalId.clear();
     console.log('🗑️ Memory storage cleared');
   }
 

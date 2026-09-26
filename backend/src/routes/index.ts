@@ -5,6 +5,7 @@ import postgresInvoiceStorage from '../storage/postgres-invoice-storage';
 import { createInvoiceRouter } from './invoice.routes';
 import { createAuditRouter } from './audit.routes';
 import { createExportRouter } from './export.routes';
+import { createImportRouter } from './import.routes';
 import { createNotificationRouter } from './notification.routes';
 import { createObservabilityRouter } from './observability.routes';
 import { createJobsRouter } from './jobs.routes';
@@ -25,6 +26,8 @@ router.use(createAuditRouter({ storage: postgresInvoiceStorage }));
 router.use(createObservabilityRouter({ storage: postgresInvoiceStorage }));
 router.use(createNotificationRouter());
 router.use(createExportRouter({ storage: postgresInvoiceStorage }));
+// Bulk import (issue #53). Dry run by default; opt in with dryRun: false.
+router.use(createImportRouter({ storage: postgresInvoiceStorage }));
 
 const jobStore = new PostgresJobStore(pool);
 router.use(createJobsRouter({ store: jobStore }));

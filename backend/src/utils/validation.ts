@@ -34,38 +34,90 @@ const plainText = (max: number, multiline = false) =>
     .max(max)
     .transform((value) => sanitizePlainText(value, { multiline }) || undefined);
 
+/**
+ * Caller-supplied import key (issue #53).
+ *
+ * Bounded to the `invoices.external_id VARCHAR(255)` column and restricted to
+ * printable characters so a key can be echoed into remediation messages and
+ * compared without normalisation surprises. Matching is case-SENSITIVE, which
+ * matches the case-sensitive partial unique index in db/schema.sql: `INV-1`
+ * and `inv-1` are two different keys. Callers that need case-insensitive
+ * identity should normalise before importing.
+ */
+const externalIdSchema = z
+  .string()
+  .trim()
+  .min(1, 'externalId must not be empty')
+  .max(255, 'externalId must be at most 255 characters')
+  .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), {
+    message: 'externalId must not contain control characters',
+  });
+
+/**
+ * Shape shared by the create-invoice and import-row schemas.
+ *
+ * `externalId` lives here rather than only on the import schema because the
+ * import pipeline reuses `createInvoice` for the write; keeping one shape means
+ * an imported invoice is validated by exactly the same rules as one created
+ * through `POST /invoices`. The HTTP create route also accepts the field, so a
+ * caller can claim an import key for a single invoice; updates are limited to
+ * descriptive fields, so a claimed key cannot rewrite amounts or ownership.
+ */
+const invoiceShape = {
+  amount: z.number().positive().max(1000000000),
+  assetCode: z.string().default('XLM').optional(),
+  assetIssuer: stellarPublicKeySchema.optional(),
+  description: plainText(500, true).optional(),
+  customerName: plainText(255).optional(),
+  customerEmail: z.string().email().optional(),
+  sellerName: plainText(255).optional(),
+  sellerEmail: z.string().email().optional(),
+  expiresInDays: z.number()
+    .int()
+    .min(MIN_INVOICE_EXPIRY_DAYS)
+    .max(MAX_INVOICE_EXPIRY_DAYS)
+    .default(DEFAULT_INVOICE_EXPIRY_DAYS),
+  sellerPublicKey: stellarPublicKeySchema,
+  externalId: externalIdSchema.optional(),
+};
+
+/** A credit asset must name its issuer; XLM is native and must not. */
+const requiresMatchingIssuer = (invoice: { assetCode?: string; assetIssuer?: string }) =>
+  !requiresIssuer(invoice.assetCode) || Boolean(invoice.assetIssuer);
+const nativeHasNoIssuer = (invoice: { assetCode?: string; assetIssuer?: string }) =>
+  invoice.assetCode !== NATIVE_ASSET_CODE || !invoice.assetIssuer;
+
 export const createInvoiceSchema = z
-  .object({
-    amount: z.number().positive().max(1000000000),
-    assetCode: z.string().default('XLM').optional(),
-    assetIssuer: stellarPublicKeySchema.optional(),
-    description: plainText(500, true).optional(),
-    customerName: plainText(255).optional(),
-    customerEmail: z.string().email().optional(),
-    sellerName: plainText(255).optional(),
-    sellerEmail: z.string().email().optional(),
-    expiresInDays: z.number()
-      .int()
-      .min(MIN_INVOICE_EXPIRY_DAYS)
-      .max(MAX_INVOICE_EXPIRY_DAYS)
-      .default(DEFAULT_INVOICE_EXPIRY_DAYS),
-    sellerPublicKey: stellarPublicKeySchema,
+  .object(invoiceShape)
+  .refine(requiresMatchingIssuer, {
+    path: ['assetIssuer'],
+    message:
+      'assetIssuer is required for issued assets; only XLM may omit it. An asset is identified by its code and issuer together.',
   })
-  .refine(
-    (invoice) => !requiresIssuer(invoice.assetCode) || Boolean(invoice.assetIssuer),
-    {
-      path: ['assetIssuer'],
-      message:
-        'assetIssuer is required for issued assets; only XLM may omit it. An asset is identified by its code and issuer together.',
-    },
-  )
-  .refine(
-    (invoice) => invoice.assetCode !== NATIVE_ASSET_CODE || !invoice.assetIssuer,
-    {
-      path: ['assetIssuer'],
-      message: 'XLM is the native asset and must not carry an issuer.',
-    },
-  );
+  .refine(nativeHasNoIssuer, {
+    path: ['assetIssuer'],
+    message: 'XLM is the native asset and must not carry an issuer.',
+  });
+
+/**
+ * One row of a bulk import file (issue #53).
+ *
+ * Identical to `createInvoiceSchema`, exported separately so the import
+ * pipeline and its tests can name the row type without implying a different
+ * validation contract. Reuses the same two asset refinements, so an imported
+ * row can never name an asset the create endpoint would have rejected.
+ */
+export const importRowSchema = z
+  .object(invoiceShape)
+  .refine(requiresMatchingIssuer, {
+    path: ['assetIssuer'],
+    message:
+      'assetIssuer is required for issued assets; only XLM may omit it. An asset is identified by its code and issuer together.',
+  })
+  .refine(nativeHasNoIssuer, {
+    path: ['assetIssuer'],
+    message: 'XLM is the native asset and must not carry an issuer.',
+  });
 
 // Payment verification schema
 export const paymentSchema = z.object({
@@ -76,10 +128,12 @@ export const paymentSchema = z.object({
 });
 
 export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>;
+export type ImportRow = z.infer<typeof importRowSchema>;
 export type PaymentInput = z.infer<typeof paymentSchema>;
 
 export default {
   createInvoiceSchema,
+  importRowSchema,
   paymentSchema,
   stellarPublicKeySchema,
 };
