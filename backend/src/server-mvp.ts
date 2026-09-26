@@ -18,6 +18,7 @@ import { configuredFrontendOrigins, corsOptions } from './config/runtime';
 import { healthHandler, readinessHandler } from './health';
 import { createAuthRouter } from './routes/auth.routes';
 import { createReconciliationRouter } from './routes/reconciliation.routes';
+import { createEmailRouter } from './routes/email.routes';
 import { authenticate, requirePermission } from './middleware/access-control';
 
 dotenv.config();
@@ -65,6 +66,7 @@ app.get('/api/ready', readinessHandler(memoryInvoiceStorage.mode));
 app.use('/api', createAuthRouter());
 app.use('/api', createReconciliationRouter({ storage: memoryInvoiceStorage }));
 app.use('/api', createInvoiceRouter({ storage: memoryInvoiceStorage }));
+app.use('/api', createEmailRouter({ storage: memoryInvoiceStorage }));
 app.use('/api', createPaymentMonitorRouter(paymentMonitorService));
 
 // Mock Stellar endpoint (MVP only)

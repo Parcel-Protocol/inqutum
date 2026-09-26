@@ -131,6 +131,90 @@ export class FakeInvoiceDb implements Queryable {
       return { rows: found.map((row) => ({ ...row })), rowCount: found.length };
     }
 
+    if (sql.startsWith('SELECT * FROM invoices WHERE memo =')) {
+      const found = this.rows.filter((row) => row.memo === params[0]);
+      return { rows: found.map((row) => ({ ...row })), rowCount: found.length };
+    }
+
+    if (sql.startsWith('SELECT id FROM invoices WHERE payment_tx_hash =')) {
+      const found = this.rows.filter((row) => row.payment_tx_hash === params[0]);
+      return { rows: found.map((row) => ({ id: row.id })), rowCount: found.length };
+    }
+
+    if (sql.startsWith('SELECT * FROM invoices WHERE seller_public_key =')) {
+      let found = this.rows.filter((row) => row.seller_public_key === params[0]);
+      if (params.length > 1 && typeof params[1] === 'string' && params[1] !== 'all') {
+        found = found.filter((row) => row.status === params[1]);
+      }
+      return { rows: found.map((row) => ({ ...row })), rowCount: found.length };
+    }
+
+    if (sql.startsWith('SELECT COUNT(*) as total_invoices') || sql.includes('revenue_by_asset')) {
+      const seller = params[0];
+      const sellerRows = this.rows.filter((row) => row.seller_public_key === seller);
+      const paidRows = sellerRows.filter((row) => row.status === 'PAID');
+      const pendingRows = sellerRows.filter((row) => row.status === 'PENDING');
+      const expiredRows = sellerRows.filter((row) => row.status === 'EXPIRED');
+
+      const revenueByAsset: Record<string, number> = {};
+      for (const row of paidRows) {
+        const asset = row.asset_code || 'XLM';
+        revenueByAsset[asset] = (revenueByAsset[asset] || 0) + parseFloat(row.amount || '0');
+      }
+
+      const row = {
+        total_invoices: sellerRows.length,
+        paid_invoices: paidRows.length,
+        pending_invoices: pendingRows.length,
+        actionable_invoices: pendingRows.length,
+        expired_invoices: expiredRows.length,
+        revenue_by_asset: revenueByAsset,
+      };
+
+      return { rows: [row], rowCount: 1 };
+    }
+
+    if (sql.startsWith('SELECT * FROM invoice_stats WHERE seller_public_key =') || sql.includes('FROM invoice_stats')) {
+      const seller = params[0];
+      const sellerRows = this.rows.filter((row) => row.seller_public_key === seller);
+      const byAsset = new Map<string, any>();
+
+      for (const row of sellerRows) {
+        const asset = row.asset_code || 'XLM';
+        if (!byAsset.has(asset)) {
+          byAsset.set(asset, {
+            seller_public_key: seller,
+            total_invoices: 0,
+            paid_invoices: 0,
+            pending_invoices: 0,
+            expired_invoices: 0,
+            cancelled_invoices: 0,
+            total_revenue: 0,
+            asset_code: asset,
+          });
+        }
+        const st = byAsset.get(asset);
+        st.total_invoices += 1;
+        if (row.status === 'PAID') {
+          st.paid_invoices += 1;
+          st.total_revenue += parseFloat(row.amount || '0');
+        } else if (row.status === 'PENDING') {
+          st.pending_invoices += 1;
+        } else if (row.status === 'EXPIRED') {
+          st.expired_invoices += 1;
+        } else if (row.status === 'CANCELLED') {
+          st.cancelled_invoices += 1;
+        }
+      }
+
+      const rows = Array.from(byAsset.values()).map((s) => ({
+        ...s,
+        total_revenue: String(s.total_revenue),
+      }));
+
+      return { rows, rowCount: rows.length };
+    }
+
     throw new Error(`FakeInvoiceDb: unsupported SQL: ${sql.slice(0, 120)}`);
   }
 

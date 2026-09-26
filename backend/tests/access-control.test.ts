@@ -53,19 +53,51 @@ describe('role and permission table', () => {
   // Written out independently of ROLE_PERMISSIONS so the table cannot pass by
   // being compared with itself.
   const EXPECTED: Record<Role, Permission[]> = {
-    anonymous: ['lifecycle:read', 'invoice:read', 'invoice:verify'],
+    anonymous: ['lifecycle:read', 'invoice:read', 'invoice:verify', 'invoice:email'],
     end_user: [
-      'lifecycle:read', 'invoice:read', 'invoice:verify', 'invoice:create', 'invoice:list',
-      'invoice:stats', 'invoice:cancel', 'invoice:audit', 'stellar:read',
+      'lifecycle:read',
+      'invoice:read',
+      'invoice:verify',
+      'invoice:create',
+      'invoice:list',
+      'invoice:stats',
+      'invoice:cancel',
+      'invoice:audit',
+      'invoice:email',
+      'invoice:deliveries',
+      'stellar:read',
     ],
     maintainer: [
-      'lifecycle:read', 'invoice:read', 'invoice:verify', 'invoice:list', 'invoice:stats',
-      'invoice:cancel', 'invoice:audit', 'invoice:simulate', 'reconciliation:run',
-      'monitor:read', 'monitor:sync', 'stellar:read',
+      'lifecycle:read',
+      'invoice:read',
+      'invoice:verify',
+      'invoice:list',
+      'invoice:stats',
+      'invoice:cancel',
+      'invoice:audit',
+      'invoice:simulate',
+      'invoice:email',
+      'invoice:deliveries',
+      'email:admin',
+      'reconciliation:run',
+      'monitor:read',
+      'monitor:sync',
+      'stellar:read',
     ],
     service: [
-      'lifecycle:read', 'invoice:read', 'invoice:verify', 'invoice:list', 'invoice:stats',
-      'invoice:audit', 'reconciliation:run', 'monitor:read', 'monitor:sync', 'stellar:read',
+      'lifecycle:read',
+      'invoice:read',
+      'invoice:verify',
+      'invoice:list',
+      'invoice:stats',
+      'invoice:audit',
+      'invoice:email',
+      'invoice:deliveries',
+      'email:admin',
+      'reconciliation:run',
+      'monitor:read',
+      'monitor:sync',
+      'stellar:read',
     ],
   };
 
@@ -384,7 +416,16 @@ describe('access control over HTTP', () => {
 
   it('covers every privileged permission except the ones exercised elsewhere', () => {
     const covered = new Set(cases.map((c) => c.permission));
-    const exercisedElsewhere: Permission[] = ['lifecycle:read', 'invoice:read', 'invoice:verify', 'reconciliation:run', 'stellar:read'];
+    const exercisedElsewhere: Permission[] = [
+      'lifecycle:read',
+      'invoice:read',
+      'invoice:verify',
+      'invoice:email',
+      'invoice:deliveries',
+      'email:admin',
+      'reconciliation:run',
+      'stellar:read',
+    ];
     for (const permission of PERMISSIONS) {
       assert.ok(
         covered.has(permission) || exercisedElsewhere.includes(permission),
