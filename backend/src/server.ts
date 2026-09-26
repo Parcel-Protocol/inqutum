@@ -12,7 +12,9 @@ import { correlationMiddleware } from './observability/telemetry';
 import invoiceService from './services/invoice.service';
 import { JobQueue, JobWorker } from './jobs/worker';
 import { PostgresJobStore } from './jobs/postgres-job-store';
-import { registerJobHandlers, startExpiryScheduler } from './jobs/runtime';
+import { registerJobHandlers, startExpiryScheduler, startRetentionScheduler } from './jobs/runtime';
+import { RetentionService } from './retention/retention-service';
+import { PostgresRetentionStore } from './retention/postgres-retention-store';
 import { buildUserSafeErrorResponse, classifyError } from './errors/error-taxonomy';
 
 dotenv.config();
@@ -23,10 +25,16 @@ const PORT = process.env.PORT || 3001;
 // Background jobs: the expiry sweep runs through the worker framework. Set
 // JOBS_EMBEDDED_WORKER=false to run workers only via `npm run worker`.
 const jobStore = new PostgresJobStore(pool);
+// Retention sweep (issue #61). Report-only by default: it enqueues a
+// retention.sweep job that plans and logs, and never deletes without an
+// explicit `apply: true` job payload.
+const retentionService = new RetentionService(new PostgresRetentionStore(pool));
 const jobWorker = registerJobHandlers(new JobWorker({ store: jobStore }), {
   expirePendingInvoices: () => invoiceService.markExpiredInvoices(),
+  retention: retentionService,
 });
 let stopExpiryScheduler: (() => void) | null = null;
+let stopRetentionScheduler: (() => void) | null = null;
 
 // Correlation ID & Latency Tracking
 app.use(correlationMiddleware());
@@ -90,7 +98,9 @@ async function initialize() {
 
     if (process.env.JOBS_EMBEDDED_WORKER !== 'false') {
       jobWorker.start();
-      stopExpiryScheduler = startExpiryScheduler(new JobQueue(jobStore));
+      const jobQueue = new JobQueue(jobStore);
+      stopExpiryScheduler = startExpiryScheduler(jobQueue);
+      stopRetentionScheduler = startRetentionScheduler(jobQueue);
     }
   } catch (error) {
     console.error('Failed to initialize:', error);
@@ -123,6 +133,7 @@ process.on('SIGTERM', async () => {
   paymentMonitorService.stop();
   jobWorker.stop();
   stopExpiryScheduler?.();
+  stopRetentionScheduler?.();
   await pool.end();
   process.exit(0);
 });
@@ -132,6 +143,7 @@ process.on('SIGINT', async () => {
   paymentMonitorService.stop();
   jobWorker.stop();
   stopExpiryScheduler?.();
+  stopRetentionScheduler?.();
   await pool.end();
   process.exit(0);
 });

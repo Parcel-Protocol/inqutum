@@ -5,15 +5,21 @@ import { pool } from './config/database';
 import invoiceService from './services/invoice.service';
 import { JobQueue, JobWorker } from './jobs/worker';
 import { PostgresJobStore } from './jobs/postgres-job-store';
-import { registerJobHandlers, startExpiryScheduler } from './jobs/runtime';
+import { registerJobHandlers, startExpiryScheduler, startRetentionScheduler } from './jobs/runtime';
+import { RetentionService } from './retention/retention-service';
+import { PostgresRetentionStore } from './retention/postgres-retention-store';
 
 dotenv.config();
 
 const store = new PostgresJobStore(pool);
+// Retention sweep (issue #61), report-only unless a job payload sets apply:true.
 const worker = registerJobHandlers(new JobWorker({ store }), {
   expirePendingInvoices: () => invoiceService.markExpiredInvoices(),
+  retention: new RetentionService(new PostgresRetentionStore(pool)),
 });
-const stopScheduler = startExpiryScheduler(new JobQueue(store));
+const jobQueue = new JobQueue(store);
+const stopScheduler = startExpiryScheduler(jobQueue);
+const stopRetention = startRetentionScheduler(jobQueue);
 
 worker.start();
 console.log('[jobs] standalone worker started');
@@ -21,6 +27,7 @@ console.log('[jobs] standalone worker started');
 async function shutdown() {
   worker.stop();
   stopScheduler();
+  stopRetention();
   await pool.end();
   process.exit(0);
 }
