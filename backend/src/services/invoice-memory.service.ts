@@ -162,6 +162,10 @@ export class InvoiceMemoryService {
   async countInvoices(): Promise<number> {
     return this.storage.countInvoices();
   }
+
+  async purgeStaleInvoices(options: { maxAgeHours: number; statuses?: any[] }): Promise<number> {
+    return this.storage.purgeStaleInvoices(options);
+  }
 }
 
 export default new InvoiceMemoryService();

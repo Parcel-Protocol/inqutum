@@ -15,7 +15,7 @@ import {
   PaymentClaimIndex,
 } from '../domain/payment-attribution';
 import type { PaymentClaim } from '../domain/payment-attribution';
-import type { AuditEvent, MarkAsPaidOptions, StoredInvoice } from './invoice-storage';
+import type { AuditEvent, InvoiceStatus, MarkAsPaidOptions, StoredInvoice } from './invoice-storage';
 
 export interface MemoryPaymentEvent {
   id: string;
@@ -317,6 +317,31 @@ class MemoryStorage {
 
   countInvoices(): number {
     return this.invoices.size;
+  }
+
+  /**
+   * Purges old settled, cancelled, or expired demo invoices older than maxAgeHours.
+   * Guarantees active, unexpired pending invoices are preserved.
+   */
+  purgeStaleInvoices(options: { maxAgeHours: number; statuses?: InvoiceStatus[] }): number {
+    const maxAgeMs = options.maxAgeHours * 3600 * 1000;
+    const cutoff = Date.now() - maxAgeMs;
+    const allowedStatuses = new Set<InvoiceStatus>(options.statuses || ['PAID', 'EXPIRED', 'CANCELLED']);
+    let purgedCount = 0;
+
+    for (const [id, invoice] of this.invoices.entries()) {
+      const isPending = invoice.status === 'PENDING';
+      const isExpired = invoice.expiresAt.getTime() <= Date.now();
+      const isEligibleStatus = allowedStatuses.has(invoice.status) || (isPending && isExpired);
+
+      if (invoice.createdAt.getTime() <= cutoff && isEligibleStatus) {
+        this.invoices.delete(id);
+        this.invoicesByMemo.delete(invoice.memo);
+        purgedCount++;
+      }
+    }
+
+    return purgedCount;
   }
 }
 

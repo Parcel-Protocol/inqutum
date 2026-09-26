@@ -88,6 +88,10 @@ export class PostgresInvoiceStorage implements InvoiceStorage {
   async countInvoices(): Promise<number> {
     return this.service.countInvoices();
   }
+
+  async purgeStaleInvoices(options: { maxAgeHours: number; statuses?: any[] }): Promise<number> {
+    return this.service.purgeStaleInvoices(options);
+  }
 }
 
 export default new PostgresInvoiceStorage();

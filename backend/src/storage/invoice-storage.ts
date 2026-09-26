@@ -107,6 +107,8 @@ export interface InvoiceStorage {
   markExpiredInvoices(now?: Date): Promise<number>;
   /** Returns total count of invoices currently stored. */
   countInvoices?(): Promise<number>;
+  /** Purges expired or historical settled demo invoices older than maxAgeHours. */
+  purgeStaleInvoices?(options: { maxAgeHours: number; statuses?: InvoiceStatus[] }): Promise<number>;
   /** Audit events for one invoice, oldest first. */
   getAuditTrail(invoiceId: string): Promise<AuditEvent[]>;
 
