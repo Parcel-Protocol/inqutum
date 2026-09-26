@@ -134,6 +134,48 @@ describe('verifyHorizonPayment — rejections', () => {
     assert.equal(codeOf(verifyHorizonPayment(input({ txHash: '' }))), 'MISSING_TX_HASH');
   });
 
+  it('rejects a memo of the wrong TYPE even when its value equals the invoice memo', () => {
+    for (const memo_type of ['id', 'hash', 'return', 'none']) {
+      const result = verifyHorizonPayment(
+        input({ transaction: { memo: 'INV-2K4H9', memo_type } })
+      );
+      assert.equal(codeOf(result), 'MEMO_MISMATCH', memo_type);
+    }
+  });
+
+  it('rejects a MEMO_HASH whose base64 form equals a text invoice memo', () => {
+    const hashAsText = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+    const result = verifyHorizonPayment(
+      input({
+        expected: expected({ memo: hashAsText }),
+        transaction: { memo: hashAsText, memo_type: 'hash' },
+      })
+    );
+    assert.equal(codeOf(result), 'MEMO_MISMATCH');
+  });
+
+  it('rejects a memo with no memo_type instead of guessing text', () => {
+    const result = verifyHorizonPayment(input({ transaction: { memo: 'INV-2K4H9' } }));
+    assert.equal(codeOf(result), 'MEMO_MISMATCH');
+  });
+
+  it('does not trim or case-fold a text memo', () => {
+    for (const memo of ['INV-2K4H9 ', ' INV-2K4H9', 'inv-2k4h9']) {
+      const result = verifyHorizonPayment(input({ transaction: { memo, memo_type: 'text' } }));
+      assert.equal(codeOf(result), 'MEMO_MISMATCH', JSON.stringify(memo));
+    }
+  });
+
+  it('accepts an invoice that requires a numeric MEMO_ID with numeric normalization', () => {
+    const result = verifyHorizonPayment(
+      input({
+        expected: expected({ memo: '5', memoType: 'id' }),
+        transaction: { memo: '05', memo_type: 'id' },
+      })
+    );
+    assert.equal(result.ok, true);
+  });
+
   it('rejects a memo mismatch', () => {
     const result = verifyHorizonPayment(
       input({ transaction: { memo: 'INV-WRONG', memo_type: 'text' } })
@@ -307,7 +349,7 @@ describe('verifyHorizonPayment — check ordering', () => {
     // A payment wrong in several ways at once: memo is reported first, then
     // destination, then amount, then asset.
     const allWrong = input({
-      transaction: { memo: 'INV-WRONG' },
+      transaction: { memo: 'INV-WRONG', memo_type: 'text' },
       operations: [
         paymentOp({
           to: OTHER_ACCOUNT,
@@ -320,7 +362,7 @@ describe('verifyHorizonPayment — check ordering', () => {
     });
     assert.equal(codeOf(verifyHorizonPayment(allWrong)), 'MEMO_MISMATCH');
 
-    const memoFixed = { ...allWrong, transaction: { memo: 'INV-2K4H9' } };
+    const memoFixed = { ...allWrong, transaction: { memo: 'INV-2K4H9', memo_type: 'text' } };
     assert.equal(codeOf(verifyHorizonPayment(memoFixed)), 'DESTINATION_MISMATCH');
 
     const destinationFixed = {

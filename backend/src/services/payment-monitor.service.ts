@@ -218,7 +218,9 @@ export class PaymentMonitorService {
   }
 
   private async handlePayment(payment: PaymentRecord): Promise<void> {
-    if (!payment.memo) return;
+    // Invoices are matched by their text memo only: an id/hash/return memo that
+    // happens to stringify like an invoice memo must not settle it (#7).
+    if (payment.memoType !== 'text' || !payment.memo) return;
     const invoice = await this.invoices.getInvoiceByMemo(payment.memo);
     if (!invoice) return;
 

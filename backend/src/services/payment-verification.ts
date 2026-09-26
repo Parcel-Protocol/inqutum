@@ -18,6 +18,7 @@ import {
 } from '../utils/asset-helpers';
 import { amountsMatch as stroopAmountsMatch } from '../utils/verify-amount-tolerance';
 import { parseSettlementTime } from '../domain/invoice-settlement';
+import { horizonMemo, memosMatch, type MemoType } from '../utils/memo-compare';
 
 import {
   messageForCode,
@@ -128,6 +129,11 @@ export function checkInvoiceIsPayable(status: string): VerificationResult<null> 
 /** What the invoice says the payment must look like. */
 export interface ExpectedPayment {
   memo: string;
+  /**
+   * Memo type the invoice requires. Defaults to `text` when a memo is expected and
+   * to `none` when the expected memo is empty (a standalone check that requires no memo).
+   */
+  memoType?: MemoType;
   amount: string | number;
   destination: string;
   assetCode: string;
@@ -272,10 +278,6 @@ export interface VerifyPaymentInput {
   network?: string;
 }
 
-function normalizeMemo(memo: unknown): string {
-  return typeof memo === 'string' ? memo : '';
-}
-
 export function transactionSettlementTime(transaction: HorizonTransactionLike): Date | undefined {
   return parseSettlementTime(transaction?.created_at) ?? undefined;
 }
@@ -307,7 +309,9 @@ export function verifyHorizonPayment(input: VerifyPaymentInput): VerificationRes
     return failure('NO_PAYMENT_OPERATION');
   }
 
-  if (normalizeMemo(transaction?.memo) !== normalizeMemo(expected.memo)) {
+  // Type AND value must agree (see utils/memo-compare.ts): a hash or id memo that
+  // stringifies like the invoice memo is not a payment for this invoice.
+  if (!memosMatch({ type: expected.memoType ?? (expected.memo ? 'text' : 'none'), value: expected.memo }, horizonMemo(transaction))) {
     return failure('MEMO_MISMATCH');
   }
 
@@ -345,7 +349,7 @@ export function verifyHorizonPayment(input: VerifyPaymentInput): VerificationRes
       amount: paymentOp.amount,
       assetCode: paidAssetCode,
       assetIssuer: paymentOp.assetType === 'native' ? undefined : paymentOp.assetIssuer,
-      memo: normalizeMemo(transaction?.memo),
+      memo: transaction?.memo ?? '',
       ...(settledAt ? { settledAt } : {}),
     },
   };

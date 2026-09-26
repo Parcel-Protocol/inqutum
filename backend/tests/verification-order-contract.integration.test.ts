@@ -74,7 +74,9 @@ describe('Issue #39: Verification Precedence Order & Failure Branches Across All
           fixture.name.includes('wrong_memo') ||
           (fixture.transaction.memo && fixture.transaction.memo !== fixture.expected.memo);
 
-        const txMemo = isMemoMismatch ? 'QUIT-MISMATCH-MEMO' : invoice.memo;
+        // Memo-type fixtures keep the invoice's own memo value: only the TYPE differs.
+        const typeOnlyMismatch = fixture.name.startsWith('memo_type_');
+        const txMemo = isMemoMismatch && !typeOnlyMismatch ? 'QUIT-MISMATCH-MEMO' : invoice.memo;
 
         const mockStellar = {
           getTransaction: async (hash: string) => {
@@ -82,6 +84,11 @@ describe('Issue #39: Verification Precedence Order & Failure Branches Across All
               transaction: {
                 ...fixture.transaction,
                 memo: txMemo,
+                ...(typeOnlyMismatch
+                  ? fixture.transaction.memo_type
+                    ? { memo_type: fixture.transaction.memo_type }
+                    : {}
+                  : { memo_type: 'text' }),
               },
               operations: fixture.operations,
             };

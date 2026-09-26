@@ -76,7 +76,8 @@ class PaymentMonitor {
                   to: record.to,
                   amount: record.amount,
                   assetCode: record.asset_type === 'native' ? 'XLM' : record.asset_code,
-                  memo: transaction.memo || undefined,
+                  // Only a text memo can identify an invoice (see lib/memo-compare.js).
+                  memo: transaction.memo_type === 'text' ? transaction.memo || undefined : undefined,
                   timestamp: new Date(record.created_at),
                 };
 

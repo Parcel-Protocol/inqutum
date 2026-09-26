@@ -1,0 +1,514 @@
+{
+  "description": "Shared memo comparison cases (issue #7). Consumed by backend/tests/memo-compare.test.ts and frontend/tests/memo-compare.test.js; both implementations must return the same `match` for every case. `expected` is what the invoice requires, `actual` is what Horizon returned (memo_type + memo).",
+  "cases": [
+    {
+      "name": "text: exact match",
+      "expected": {
+        "type": "text",
+        "value": "INV-2K4H9"
+      },
+      "actual": {
+        "type": "text",
+        "value": "INV-2K4H9"
+      },
+      "match": true
+    },
+    {
+      "name": "text: case differs",
+      "expected": {
+        "type": "text",
+        "value": "INV-2K4H9"
+      },
+      "actual": {
+        "type": "text",
+        "value": "inv-2k4h9"
+      },
+      "match": false
+    },
+    {
+      "name": "text: trailing space",
+      "expected": {
+        "type": "text",
+        "value": "INV-2K4H9"
+      },
+      "actual": {
+        "type": "text",
+        "value": "INV-2K4H9 "
+      },
+      "match": false
+    },
+    {
+      "name": "text: leading space",
+      "expected": {
+        "type": "text",
+        "value": "INV-2K4H9"
+      },
+      "actual": {
+        "type": "text",
+        "value": " INV-2K4H9"
+      },
+      "match": false
+    },
+    {
+      "name": "text: different value",
+      "expected": {
+        "type": "text",
+        "value": "INV-2K4H9"
+      },
+      "actual": {
+        "type": "text",
+        "value": "INV-WRONG"
+      },
+      "match": false
+    },
+    {
+      "name": "text: unicode is byte exact",
+      "expected": {
+        "type": "text",
+        "value": "INV-\u00e9"
+      },
+      "actual": {
+        "type": "text",
+        "value": "INV-\u00e9"
+      },
+      "match": true
+    },
+    {
+      "name": "text: composed vs decomposed unicode differ",
+      "expected": {
+        "type": "text",
+        "value": "INV-\u00e9"
+      },
+      "actual": {
+        "type": "text",
+        "value": "INV-e\u0301"
+      },
+      "match": false
+    },
+    {
+      "name": "text: empty expected never matches",
+      "expected": {
+        "type": "text",
+        "value": ""
+      },
+      "actual": {
+        "type": "text",
+        "value": ""
+      },
+      "match": false
+    },
+    {
+      "name": "text: actual missing memo",
+      "expected": {
+        "type": "text",
+        "value": "INV-2K4H9"
+      },
+      "actual": {
+        "type": "none"
+      },
+      "match": false
+    },
+    {
+      "name": "type confusion: id memo stringifying like expected text",
+      "expected": {
+        "type": "text",
+        "value": "12345"
+      },
+      "actual": {
+        "type": "id",
+        "value": "12345"
+      },
+      "match": false
+    },
+    {
+      "name": "type confusion: hash memo whose base64 equals expected text",
+      "expected": {
+        "type": "text",
+        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      },
+      "actual": {
+        "type": "hash",
+        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      },
+      "match": false
+    },
+    {
+      "name": "type confusion: return memo vs text",
+      "expected": {
+        "type": "text",
+        "value": "INV-2K4H9"
+      },
+      "actual": {
+        "type": "return",
+        "value": "INV-2K4H9"
+      },
+      "match": false
+    },
+    {
+      "name": "type confusion: text memo vs expected id",
+      "expected": {
+        "type": "id",
+        "value": "5"
+      },
+      "actual": {
+        "type": "text",
+        "value": "5"
+      },
+      "match": false
+    },
+    {
+      "name": "type confusion: hash vs return with same bytes",
+      "expected": {
+        "type": "hash",
+        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      },
+      "actual": {
+        "type": "return",
+        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      },
+      "match": false
+    },
+    {
+      "name": "type confusion: unknown actual type",
+      "expected": {
+        "type": "text",
+        "value": "INV-2K4H9"
+      },
+      "actual": {
+        "type": "bogus",
+        "value": "INV-2K4H9"
+      },
+      "match": false
+    },
+    {
+      "name": "type confusion: actual type missing but memo present",
+      "expected": {
+        "type": "text",
+        "value": "INV-2K4H9"
+      },
+      "actual": {
+        "value": "INV-2K4H9"
+      },
+      "match": false
+    },
+    {
+      "name": "id: equal",
+      "expected": {
+        "type": "id",
+        "value": "5"
+      },
+      "actual": {
+        "type": "id",
+        "value": "5"
+      },
+      "match": true
+    },
+    {
+      "name": "id: leading zeros are numerically equal",
+      "expected": {
+        "type": "id",
+        "value": "5"
+      },
+      "actual": {
+        "type": "id",
+        "value": "05"
+      },
+      "match": true
+    },
+    {
+      "name": "id: number input equals string",
+      "expected": {
+        "type": "id",
+        "value": 5
+      },
+      "actual": {
+        "type": "id",
+        "value": "5"
+      },
+      "match": true
+    },
+    {
+      "name": "id: different number",
+      "expected": {
+        "type": "id",
+        "value": "5"
+      },
+      "actual": {
+        "type": "id",
+        "value": "6"
+      },
+      "match": false
+    },
+    {
+      "name": "id: zero",
+      "expected": {
+        "type": "id",
+        "value": "0"
+      },
+      "actual": {
+        "type": "id",
+        "value": "000"
+      },
+      "match": true
+    },
+    {
+      "name": "id: max uint64",
+      "expected": {
+        "type": "id",
+        "value": "18446744073709551615"
+      },
+      "actual": {
+        "type": "id",
+        "value": "18446744073709551615"
+      },
+      "match": true
+    },
+    {
+      "name": "id: beyond uint64 is invalid",
+      "expected": {
+        "type": "id",
+        "value": "18446744073709551616"
+      },
+      "actual": {
+        "type": "id",
+        "value": "18446744073709551616"
+      },
+      "match": false
+    },
+    {
+      "name": "id: above 2^53 keeps precision",
+      "expected": {
+        "type": "id",
+        "value": "9007199254740993"
+      },
+      "actual": {
+        "type": "id",
+        "value": "9007199254740992"
+      },
+      "match": false
+    },
+    {
+      "name": "id: non-numeric",
+      "expected": {
+        "type": "id",
+        "value": "5"
+      },
+      "actual": {
+        "type": "id",
+        "value": "5a"
+      },
+      "match": false
+    },
+    {
+      "name": "id: whitespace is not tolerated",
+      "expected": {
+        "type": "id",
+        "value": "5"
+      },
+      "actual": {
+        "type": "id",
+        "value": " 5"
+      },
+      "match": false
+    },
+    {
+      "name": "id: signed value is invalid",
+      "expected": {
+        "type": "id",
+        "value": "-5"
+      },
+      "actual": {
+        "type": "id",
+        "value": "-5"
+      },
+      "match": false
+    },
+    {
+      "name": "id: decimal is invalid",
+      "expected": {
+        "type": "id",
+        "value": "5.0"
+      },
+      "actual": {
+        "type": "id",
+        "value": "5"
+      },
+      "match": false
+    },
+    {
+      "name": "id: empty is invalid",
+      "expected": {
+        "type": "id",
+        "value": ""
+      },
+      "actual": {
+        "type": "id",
+        "value": ""
+      },
+      "match": false
+    },
+    {
+      "name": "hash: identical base64",
+      "expected": {
+        "type": "hash",
+        "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+      },
+      "actual": {
+        "type": "hash",
+        "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+      },
+      "match": true
+    },
+    {
+      "name": "hash: expected hex, actual base64 of the same bytes",
+      "expected": {
+        "type": "hash",
+        "value": "0101010101010101010101010101010101010101010101010101010101010101"
+      },
+      "actual": {
+        "type": "hash",
+        "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+      },
+      "match": true
+    },
+    {
+      "name": "hash: hex is case-insensitive",
+      "expected": {
+        "type": "hash",
+        "value": "ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB"
+      },
+      "actual": {
+        "type": "hash",
+        "value": "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s="
+      },
+      "match": true
+    },
+    {
+      "name": "hash: one byte differs",
+      "expected": {
+        "type": "hash",
+        "value": "0101010101010101010101010101010101010101010101010101010101010101"
+      },
+      "actual": {
+        "type": "hash",
+        "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQI="
+      },
+      "match": false
+    },
+    {
+      "name": "hash: wrong length (31 bytes)",
+      "expected": {
+        "type": "hash",
+        "value": "01010101010101010101010101010101010101010101010101010101010101"
+      },
+      "actual": {
+        "type": "hash",
+        "value": "01010101010101010101010101010101010101010101010101010101010101"
+      },
+      "match": false
+    },
+    {
+      "name": "hash: not base64 or hex",
+      "expected": {
+        "type": "hash",
+        "value": "not-a-hash"
+      },
+      "actual": {
+        "type": "hash",
+        "value": "not-a-hash"
+      },
+      "match": false
+    },
+    {
+      "name": "hash: base64 without padding is invalid",
+      "expected": {
+        "type": "hash",
+        "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
+      },
+      "actual": {
+        "type": "hash",
+        "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
+      },
+      "match": false
+    },
+    {
+      "name": "return: identical base64",
+      "expected": {
+        "type": "return",
+        "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+      },
+      "actual": {
+        "type": "return",
+        "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+      },
+      "match": true
+    },
+    {
+      "name": "none: both none",
+      "expected": {
+        "type": "none"
+      },
+      "actual": {
+        "type": "none"
+      },
+      "match": true
+    },
+    {
+      "name": "none: both none, actual has null memo",
+      "expected": {
+        "type": "none"
+      },
+      "actual": {
+        "type": "none",
+        "value": null
+      },
+      "match": true
+    },
+    {
+      "name": "none: expected none, actual text",
+      "expected": {
+        "type": "none"
+      },
+      "actual": {
+        "type": "text",
+        "value": "INV-2K4H9"
+      },
+      "match": false
+    },
+    {
+      "name": "none: expected none, actual empty text is not none",
+      "expected": {
+        "type": "none"
+      },
+      "actual": {
+        "type": "text",
+        "value": ""
+      },
+      "match": false
+    },
+    {
+      "name": "unknown expected type",
+      "expected": {
+        "type": "bogus",
+        "value": "x"
+      },
+      "actual": {
+        "type": "bogus",
+        "value": "x"
+      },
+      "match": false
+    },
+    {
+      "name": "type names are case-sensitive",
+      "expected": {
+        "type": "TEXT",
+        "value": "x"
+      },
+      "actual": {
+        "type": "TEXT",
+        "value": "x"
+      },
+      "match": false
+    }
+  ]
+}
