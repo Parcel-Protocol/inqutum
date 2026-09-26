@@ -40,6 +40,27 @@ being silently treated as a wildcard.
   credit asset that merely looks like lumens, and treating it as native is the
   confusion this rule exists to prevent.
 
+## Create is forgiving, verify is strict (issue #8)
+
+Two different jobs, deliberately kept apart:
+
+| | At invoice creation | At verification |
+| --- | --- | --- |
+| Asset code | Trimmed and **uppercased** (`usdc` becomes `USDC`), then must be 1-12 letters/digits | Compared **byte-for-byte** with what Horizon reports |
+| Issuer | Must be a well-formed `G...` Ed25519 strkey **with a valid checksum**; never case-folded, so `g...` is rejected, not fixed | Compared **byte-for-byte**; no trimming, no case folding |
+| Owner | `assetCodeSchema` / `assetIssuerSchema` in `backend/src/utils/validation.ts` | `assetsMatch` in `backend/src/utils/asset-helpers.ts` |
+
+Normalizing on create means a seller who types `usdc` gets an invoice that can
+actually be paid. Keeping verify exact means no payment in a look-alike asset or
+to a different issuer can ever settle an invoice. Do **not** relax the verify
+side for convenience: base32 issuer keys are case-significant, and a lenient
+match is a security bug, not a usability win.
+
+Existing data: `db/migrations/001-normalize-asset-codes.sql` (applied by
+`npm run db:migrate`) rewrites the code of still-`PENDING` invoices to the
+canonical form. Paid and closed invoices are left alone. The file also contains
+a query to list invoices that can never be settled (no issuer, malformed code).
+
 ## Adding an asset to the frontend
 
 `frontend/lib/assets.ts` holds the assets a seller can choose. Every entry

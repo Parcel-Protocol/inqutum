@@ -8,6 +8,13 @@
  * look-alike settle a native invoice, which is exactly what this module exists
  * to prevent.
  *
+ * Comparison here is intentionally STRICT: code and issuer are compared
+ * byte-for-byte, with no trimming, case folding or other normalization
+ * (issue #8). Friendly normalization ("usdc" -> "USDC") happens once, when the
+ * invoice is created (`assetCodeSchema` in utils/validation.ts), so what is
+ * stored is already canonical. Loosening the comparison, especially on the
+ * issuer key, would let a payment in a look-alike asset settle an invoice.
+ *
  * See `docs/ASSETS.md`.
  */
 
@@ -39,8 +46,8 @@ export function resolvePaymentAsset(fields: AssetFields): AssetIdentity {
     return { kind: 'native', code: NATIVE_ASSET_CODE };
   }
 
-  const code = (fields.assetCode ?? '').trim();
-  const issuer = (fields.assetIssuer ?? '').trim();
+  const code = fields.assetCode ?? '';
+  const issuer = fields.assetIssuer ?? '';
 
   if (!issuer) {
     return { kind: 'unpinned', code };
@@ -60,8 +67,8 @@ export function resolveInvoiceAsset(fields: {
   assetCode?: string;
   assetIssuer?: string;
 }): AssetIdentity {
-  const code = (fields.assetCode ?? '').trim();
-  const issuer = (fields.assetIssuer ?? '').trim();
+  const code = fields.assetCode ?? '';
+  const issuer = fields.assetIssuer ?? '';
 
   if (code === NATIVE_ASSET_CODE && !issuer) {
     return { kind: 'native', code: NATIVE_ASSET_CODE };

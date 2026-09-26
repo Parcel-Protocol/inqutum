@@ -24,6 +24,17 @@ async function migrate() {
 
     await pool.query(schema);
 
+    // Data migrations (db/migrations/*.sql) run in filename order. Each one is
+    // idempotent, so re-running `db:migrate` is safe.
+    const migrationsDir = path.join(SQL_DIR, 'migrations');
+    if (fs.existsSync(migrationsDir)) {
+      const files = fs.readdirSync(migrationsDir).filter((file) => file.endsWith('.sql')).sort();
+      for (const file of files) {
+        await pool.query(fs.readFileSync(path.join(migrationsDir, file), 'utf-8'));
+        console.log(`  applied migration ${file}`);
+      }
+    }
+
     console.log('✅ Database migration completed successfully!\n');
     console.log('📋 Created tables:');
     console.log('  - invoices (keyed by seller_public_key)');
