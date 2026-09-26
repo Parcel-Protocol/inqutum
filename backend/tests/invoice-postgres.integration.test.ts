@@ -312,3 +312,45 @@ describe('Invoice persistence on Postgres', { skip: DATABASE_URL ? false : 'DATA
     assert.equal(result.rows[0].c, 4, 'seed rows should be exactly 4 after two runs (ON CONFLICT DO NOTHING)');
   });
 });
+
+// Issue #14: the database itself refuses a transaction hash on two invoices.
+describe('Postgres payment_tx_hash uniqueness', { skip: DATABASE_URL ? false : 'DATABASE_URL is not set' }, () => {
+  const seller = Keypair.random().publicKey();
+  let pool: Pool;
+
+  before(async () => {
+    pool = new Pool({ connectionString: DATABASE_URL });
+    await pool.query(fs.readFileSync(SCHEMA_PATH, 'utf-8'));
+  });
+
+  after(async () => {
+    await pool.query('DELETE FROM invoices WHERE seller_public_key = $1', [seller]);
+    await pool.end();
+  });
+
+  const insert = (memo: string, hash: string | null) =>
+    pool.query(
+      `INSERT INTO invoices (seller_public_key, amount, memo, status, payment_tx_hash)
+       VALUES ($1, 1, $2, $3, $4)`,
+      [seller, memo, hash ? 'PAID' : 'PENDING', hash],
+    );
+
+  it('rejects the same hash on two invoices with a unique violation', async () => {
+    const hash = Keypair.random().rawPublicKey().toString('hex');
+    await insert(`INV-UQ-A-${hash.slice(0, 6)}`, hash);
+    await assert.rejects(
+      () => insert(`INV-UQ-B-${hash.slice(0, 6)}`, hash),
+      (error: any) => error.code === '23505' && String(error.constraint).includes('payment_tx_hash'),
+    );
+  });
+
+  it('allows any number of invoices without a hash', async () => {
+    const tag = Keypair.random().rawPublicKey().toString('hex').slice(0, 8);
+    await insert(`INV-NULL-A-${tag}`, null);
+    await insert(`INV-NULL-B-${tag}`, null);
+  });
+
+  it('the schema can be re-applied without error (idempotent index and guard)', async () => {
+    await pool.query(fs.readFileSync(SCHEMA_PATH, 'utf-8'));
+  });
+});

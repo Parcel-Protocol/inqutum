@@ -135,23 +135,22 @@ so a second instance would not see another instance's claims. That is correct
 for the single-instance memory backend and is the reason the durable form
 belongs in Postgres.
 
-**Postgres (recommended, not in this PR).** `db/schema.sql` already indexes
-memo, but not uniquely, and `payment_tx_hash` carries no constraint at all:
+**Postgres (issue #14).** `memo` is `UNIQUE NOT NULL` in `db/schema.sql`, and
+`payment_tx_hash` now has a partial unique index, so the second half of the rule is
+durable too:
 
 ```sql
--- replaces idx_invoices_memo, which becomes redundant
-CREATE UNIQUE INDEX IF NOT EXISTS uq_invoices_memo ON invoices (memo);
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_invoices_payment_tx_hash
-  ON invoices (payment_tx_hash)
-  WHERE payment_tx_hash IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_payment_tx_hash_unique
+  ON invoices(payment_tx_hash) WHERE payment_tx_hash IS NOT NULL;
 ```
 
-Why it is not in this PR: the Postgres path cannot be exercised by this
-repository's default test run (`npm run test:pg` needs a live database), and an
-unverified migration is worse than a documented one. Until it lands, the two
-backends differ on this rule — worth saying out loud rather than leaving to be
-discovered.
+A second invoice trying to record a hash that already settled another fails with
+`23505`; `InvoiceService.markAsPaid` maps that to `PaymentClaimError`
+(`TX_HASH_ALREADY_USED`), the same error the memory backend raises, so both backends
+now refuse the same case the same way, across instances and restarts. Applying the
+schema to a database that already contains duplicate hashes stops with a readable
+exception rather than a bare index error; those rows are double-settlements and need
+a human decision.
 
 ## Coverage
 

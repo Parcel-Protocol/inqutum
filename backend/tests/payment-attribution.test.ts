@@ -183,3 +183,61 @@ describe('memo uniqueness', () => {
     await assert.rejects(() => service.createInvoice(invoiceInput()), MemoCollisionError);
   });
 });
+
+// Issue #14: the Postgres unique index is the durable form of the same rule.
+describe('Postgres payment_tx_hash uniqueness (schema + error mapping)', () => {
+  it('schema declares the partial unique index and a readable duplicate guard', async () => {
+    const { readFileSync } = await import('node:fs');
+    const path = await import('node:path');
+    const sql = readFileSync(path.join(__dirname, '../../db/schema.sql'), 'utf8');
+    assert.match(
+      sql,
+      /CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_payment_tx_hash_unique\s+ON invoices\(payment_tx_hash\) WHERE payment_tx_hash IS NOT NULL/,
+    );
+    assert.match(sql, /payment_tx_hash has duplicates/);
+    assert.match(sql, /memo TEXT UNIQUE NOT NULL/);
+    assert.match(sql, /CREATE INDEX IF NOT EXISTS idx_invoices_seller ON invoices\(seller_public_key\)/);
+  });
+
+  it('a unique violation on the hash index surfaces as PaymentClaimError', async () => {
+    const { InvoiceService } = await import('../src/services/invoice.service.ts');
+    const { PaymentClaimError } = await import('../src/domain/payment-attribution.ts');
+    const hash = 'ab'.repeat(32);
+    const db = {
+      async query(text: string) {
+        if (text.includes('UPDATE invoices')) {
+          const error: any = new Error('duplicate key value violates unique constraint');
+          error.code = '23505';
+          error.constraint = 'idx_invoices_payment_tx_hash_unique';
+          throw error;
+        }
+        return { rows: [{ id: 'settled-invoice' }] };
+      },
+    };
+    await assert.rejects(
+      () => new InvoiceService(db as any).markAsPaid('inv-2', hash, 'GPAYER'),
+      (error: any) =>
+        error instanceof PaymentClaimError &&
+        error.code === 'TX_HASH_ALREADY_USED' &&
+        error.settledInvoiceId === 'settled-invoice' &&
+        error.invoiceId === 'inv-2',
+    );
+  });
+
+  it('other unique violations are not mistaken for a hash conflict', async () => {
+    const { InvoiceService } = await import('../src/services/invoice.service.ts');
+    const { PaymentClaimError } = await import('../src/domain/payment-attribution.ts');
+    const db = {
+      async query() {
+        const error: any = new Error('duplicate key');
+        error.code = '23505';
+        error.constraint = 'invoices_memo_key';
+        throw error;
+      },
+    };
+    await assert.rejects(
+      () => new InvoiceService(db as any).markAsPaid('inv-3', 'cd'.repeat(32), 'GPAYER'),
+      (error: any) => !(error instanceof PaymentClaimError),
+    );
+  });
+});

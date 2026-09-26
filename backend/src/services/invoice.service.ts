@@ -15,6 +15,7 @@ import {
   type InvoiceEvent,
   type InvoiceStatus,
 } from '../../../shared/invoice-lifecycle';
+import { PaymentClaimError } from '../domain/payment-attribution';
 import type { AuditEvent, MarkAsPaidOptions } from '../storage/invoice-storage';
 import type { ReconciliationInvoice, ReconciliationSettlement } from '../domain/reconciliation';
 
@@ -237,6 +238,15 @@ export class InvoiceService {
 
       return this.mapRowToInvoice(result.rows[0]);
     } catch (error: any) {
+      // 23505 = unique_violation on idx_invoices_payment_tx_hash_unique: this
+      // transaction already settled another invoice. The database is the
+      // durable backstop for the in-process PaymentClaimIndex (issue #14).
+      if (error?.code === '23505' && String(error?.constraint ?? '').includes('payment_tx_hash')) {
+        const settled = await this.db
+          .query('SELECT id FROM invoices WHERE payment_tx_hash = $1', [txHash])
+          .catch(() => ({ rows: [] as any[] }));
+        throw new PaymentClaimError(txHash, invoiceId, settled.rows[0]?.id ?? 'unknown');
+      }
       if (
         error instanceof SettlementTimeUnavailableError ||
         error instanceof InvalidTransitionError ||
