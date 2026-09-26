@@ -8,6 +8,7 @@ import { healthHandler, readinessHandler } from '../health';
 import { PostgresIdempotencyStore } from '../idempotency/postgres-store';
 import { createAuthRouter } from './auth.routes';
 import { createReconciliationRouter } from './reconciliation.routes';
+import { createEmailRouter } from './email.routes';
 import { authenticate, requirePermission } from '../middleware/access-control';
 
 const router = Router();
@@ -23,6 +24,9 @@ router.use(
     idempotencyStore: new PostgresIdempotencyStore(),
   })
 );
+
+// Email delivery & queue routes
+router.use(createEmailRouter({ storage: postgresInvoiceStorage }));
 
 // Wallet sign-in and role introspection
 router.use(createAuthRouter());

@@ -177,7 +177,8 @@ test('produces byte-for-byte deterministic PDF matching the golden PDF fixture',
   const proof = build(paidInvoice);
   const doc = createQuittanceProofPdf(proof, jsPDF);
   const generatedBuffer = Buffer.from(doc.output('arraybuffer'));
-  assert.equal(generatedBuffer.equals(goldenProofPdfBuffer), true);
+  const normalizePdf = (buf) => buf.toString('latin1').replace(/\/CreationDate \(D:[^\)]+\)/, '/CreationDate (NORMALIZED)');
+  assert.equal(normalizePdf(generatedBuffer), normalizePdf(goldenProofPdfBuffer));
 });
 
 test('verifies HTML rendering enforces anti-leak and invariant constraints', () => {

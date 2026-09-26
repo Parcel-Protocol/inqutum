@@ -34,6 +34,9 @@ export const PERMISSIONS = [
   'invoice:cancel',
   'invoice:audit',
   'invoice:simulate',
+  'invoice:email',
+  'invoice:deliveries',
+  'email:admin',
   'reconciliation:run',
   'monitor:read',
   'monitor:sync',
@@ -49,7 +52,7 @@ export type Permission = (typeof PERMISSIONS)[number];
  * than by who asks.
  */
 export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
-  anonymous: ['lifecycle:read', 'invoice:read', 'invoice:verify'],
+  anonymous: ['lifecycle:read', 'invoice:read', 'invoice:verify', 'invoice:email'],
   end_user: [
     'lifecycle:read',
     'invoice:read',
@@ -59,6 +62,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'invoice:stats',
     'invoice:cancel',
     'invoice:audit',
+    'invoice:email',
+    'invoice:deliveries',
     'stellar:read',
   ],
   maintainer: [
@@ -70,6 +75,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'invoice:cancel',
     'invoice:audit',
     'invoice:simulate',
+    'invoice:email',
+    'invoice:deliveries',
+    'email:admin',
     'reconciliation:run',
     'monitor:read',
     'monitor:sync',
@@ -82,6 +90,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'invoice:list',
     'invoice:stats',
     'invoice:audit',
+    'invoice:email',
+    'invoice:deliveries',
+    'email:admin',
     'reconciliation:run',
     'monitor:read',
     'monitor:sync',
@@ -100,6 +111,7 @@ export const OWNED_PERMISSIONS: readonly Permission[] = [
   'invoice:stats',
   'invoice:cancel',
   'invoice:audit',
+  'invoice:deliveries',
 ];
 
 export function isRole(value: unknown): value is Role {
