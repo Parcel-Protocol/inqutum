@@ -70,4 +70,24 @@ describe('import endpoint over HTTP', () => {
       server.close();
     }
   });
+
+  it('rejects a payload that exceeds the maxRows sent in the request', async () => {
+    const store = new MemoryStorage();
+    const storage = new MemoryInvoiceStorage(new InvoiceMemoryService(store));
+    const app = express();
+    app.use(express.json());
+    app.use('/api', createImportRouter({ storage }));
+    const server = app.listen(0);
+    await new Promise(r => server.once('listening', r));
+    const port = (server.address() as any).port;
+    try {
+      const rows = [1, 2, 3].map((n) => ({ externalId: `INV-${n}`, sellerPublicKey: SELLER, amount: 10 }));
+      const res = await post(port, { payload: rows, maxRows: 2 });
+      assert.equal(res.status, 400);
+      assert.match(res.body.error, /exceeds the limit of 2/);
+      assert.equal(store.size(), 0);
+    } finally {
+      server.close();
+    }
+  });
 });

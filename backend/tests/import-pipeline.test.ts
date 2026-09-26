@@ -153,6 +153,25 @@ describe('import pipeline (issue #53)', () => {
         /exceeds the limit of 2/
       );
     });
+
+    it('honours a per-call maxRows passed through run()', async () => {
+      const three = [row({ externalId: 'a' }), row({ externalId: 'b' }), row({ externalId: 'c' })];
+      await assert.rejects(
+        () => service.run({ payload: three, maxRows: 2 }),
+        /exceeds the limit of 2/
+      );
+      // The same payload is fine when the caller raises its own cap.
+      const plan = await service.run({ payload: three, maxRows: 5 });
+      assert.equal(plan.total, 3);
+    });
+
+    it('never lets a per-call maxRows raise the deployment ceiling', async () => {
+      const capped = new ImportService(storage, { maxRows: 2 });
+      await assert.rejects(
+        () => capped.run({ payload: [row({ externalId: 'a' }), row({ externalId: 'b' }), row({ externalId: 'c' })], maxRows: 100 }),
+        /exceeds the limit of 2/
+      );
+    });
   });
 
   /* ---------------------------------------------------------------- */

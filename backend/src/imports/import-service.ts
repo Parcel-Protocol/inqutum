@@ -392,17 +392,36 @@ export class ImportService {
   }
 
   /**
+   * The row limit for one call.
+   *
+   * The constructor option is a deployment ceiling. A per-call value may only
+   * tighten it, never raise it, so a caller cannot lift the server's cap by
+   * passing a larger `maxRows` in the request body.
+   */
+  private resolveLimit(perCall?: number): number {
+    return perCall === undefined ? this.maxRows : Math.min(this.maxRows, perCall);
+  }
+
+  private assertRowLimit(rows: unknown[], limit: number): void {
+    if (rows.length > limit) {
+      throw new ImportFormatError(
+        `Import has ${rows.length} rows, which exceeds the limit of ${limit}. Split the file and import in batches.`
+      );
+    }
+  }
+
+  /**
    * Plan an import without writing anything.
    *
    * Safe on production data: no creates, no updates, and the existence check
    * goes through the read-only `getInvoiceByExternalId`.
    */
-  async plan(format: ImportFormat, rows: Record<string, unknown>[]): Promise<ImportPlan> {
-    if (rows.length > this.maxRows) {
-      throw new ImportFormatError(
-        `Import has ${rows.length} rows, which exceeds the limit of ${this.maxRows}. Split the file and import in batches.`
-      );
-    }
+  async plan(
+    format: ImportFormat,
+    rows: Record<string, unknown>[],
+    maxRows?: number
+  ): Promise<ImportPlan> {
+    this.assertRowLimit(rows, this.resolveLimit(maxRows));
 
     const rowPlans: ImportRowPlan[] = [];
     const counts: ImportCounts = { create: 0, update: 0, skip: 0, error: 0 };
@@ -525,14 +544,15 @@ export class ImportService {
    * returned plan reports exactly what was written, and `rollback` lists the
    * invoices this run created so the import can be undone.
    */
-  async apply(format: ImportFormat, rows: Record<string, unknown>[]): Promise<ImportPlan> {
-    if (rows.length > this.maxRows) {
-      throw new ImportFormatError(
-        `Import has ${rows.length} rows, which exceeds the limit of ${this.maxRows}. Split the file and import in batches.`
-      );
-    }
+  async apply(
+    format: ImportFormat,
+    rows: Record<string, unknown>[],
+    maxRows?: number
+  ): Promise<ImportPlan> {
+    const limit = this.resolveLimit(maxRows);
+    this.assertRowLimit(rows, limit);
 
-    const plan = await this.plan(format, rows);
+    const plan = await this.plan(format, rows, limit);
     const rowPlans: ImportRowPlan[] = [];
     const counts: ImportCounts = { create: 0, update: 0, skip: 0, error: 0 };
     const createdInvoiceIds: string[] = [];
@@ -626,7 +646,9 @@ export class ImportService {
     const rows = parsePayload(format, request.payload);
     // Default to a dry run: writing requires an explicit opt-out.
     const dryRun = request.dryRun !== false;
-    return dryRun ? this.plan(format, rows) : this.apply(format, rows);
+    return dryRun
+      ? this.plan(format, rows, request.maxRows)
+      : this.apply(format, rows, request.maxRows);
   }
 }
 
