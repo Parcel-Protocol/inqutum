@@ -374,7 +374,7 @@ how settlement compares them is documented in
 Background jobs (retries, dead-letter queue, running workers): [`docs/JOBS.md`](./docs/JOBS.md).
 Accessibility conventions and checks: [`docs/ACCESSIBILITY.md`](./docs/ACCESSIBILITY.md).
 Notifications: [`docs/NOTIFICATIONS.md`](./docs/NOTIFICATIONS.md). Data exports: [`docs/EXPORTS.md`](./docs/EXPORTS.md). Bulk imports with dry run and rollback: [`docs/IMPORTS.md`](./docs/IMPORTS.md). Untrusted content and URL handling: [`docs/CONTENT_SAFETY.md`](./docs/CONTENT_SAFETY.md).
-
+Data retention windows and what is protected: [`docs/RETENTION.md`](./docs/RETENTION.md). Disaster-recovery validation (`npm run validate:dr`): [`docs/RECOVERY.md`](./docs/RECOVERY.md).
 ## Tests & CI
 
 Every pull request and every push to `main` runs the same three jobs defined in
