@@ -137,7 +137,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text' },
     operations: [{ type: 'payment', from: PAYER_PK, to: SELLER_PK, amount: '100.0000000', asset_type: 'native' }],
   },
 
@@ -156,7 +156,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text' },
     operations: [{ type: 'payment', from: PAYER_PK, to: SELLER_PK, amount: '100.0000000', asset_type: 'native' }],
   },
 
@@ -175,7 +175,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text' },
     operations: [{ type: 'payment', from: PAYER_PK, to: SELLER_PK, amount: '100.0000000', asset_type: 'native' }],
   },
 
@@ -194,7 +194,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text' },
     operations: [
       { type: 'manage_data', from: PAYER_PK },
       { type: 'change_trust', from: PAYER_PK },
@@ -216,7 +216,64 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-WRONG-MEMO' },
+    transaction: { memo: 'QUIT-WRONG-MEMO', memo_type: 'text' },
+    operations: [{ type: 'payment', from: PAYER_PK, to: SELLER_PK, amount: '100.0000000', asset_type: 'native' }],
+  },
+
+  // Stage 4 (issue #7): memo TYPE is part of the memo, not just its value
+  {
+    name: 'memo_type_id_with_text_lookalike_value',
+    description: 'A MEMO_ID whose value equals the invoice text memo must not settle it',
+    expectedOutcome: 'fail',
+    expectedCode: 'MEMO_MISMATCH',
+    txHash: VALID_TX_HASH,
+    network: 'TESTNET',
+    expected: {
+      memo: 'QUIT-1001',
+      amount: '100.0000000',
+      destination: SELLER_PK,
+      assetCode: 'XLM',
+      network: 'TESTNET',
+    },
+    transaction: { memo: 'QUIT-1001', memo_type: 'id' },
+    operations: [{ type: 'payment', from: PAYER_PK, to: SELLER_PK, amount: '100.0000000', asset_type: 'native' }],
+  },
+
+  // Stage 4 (issue #7): memo TYPE is part of the memo, not just its value
+  {
+    name: 'memo_type_hash_with_text_lookalike_value',
+    description: 'A MEMO_HASH whose value equals the invoice text memo must not settle it',
+    expectedOutcome: 'fail',
+    expectedCode: 'MEMO_MISMATCH',
+    txHash: VALID_TX_HASH,
+    network: 'TESTNET',
+    expected: {
+      memo: 'QUIT-1001',
+      amount: '100.0000000',
+      destination: SELLER_PK,
+      assetCode: 'XLM',
+      network: 'TESTNET',
+    },
+    transaction: { memo: 'QUIT-1001', memo_type: 'hash' },
+    operations: [{ type: 'payment', from: PAYER_PK, to: SELLER_PK, amount: '100.0000000', asset_type: 'native' }],
+  },
+
+  // Stage 4 (issue #7): memo TYPE is part of the memo, not just its value
+  {
+    name: 'memo_type_missing_is_not_guessed',
+    description: 'A memo with no memo_type is unknown, never assumed to be text',
+    expectedOutcome: 'fail',
+    expectedCode: 'MEMO_MISMATCH',
+    txHash: VALID_TX_HASH,
+    network: 'TESTNET',
+    expected: {
+      memo: 'QUIT-1001',
+      amount: '100.0000000',
+      destination: SELLER_PK,
+      assetCode: 'XLM',
+      network: 'TESTNET',
+    },
+    transaction: { memo: 'QUIT-1001' },
     operations: [{ type: 'payment', from: PAYER_PK, to: SELLER_PK, amount: '100.0000000', asset_type: 'native' }],
   },
 
@@ -235,7 +292,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text' },
     operations: [{ type: 'payment', from: PAYER_PK, to: OTHER_PK, amount: '100.0000000', asset_type: 'native' }],
   },
 
@@ -254,7 +311,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text' },
     operations: [{ type: 'payment', from: PAYER_PK, to: SELLER_PK, amount: '99.0000000', asset_type: 'native' }],
   },
 
@@ -274,7 +331,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetIssuer: USDC_ISSUER,
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text' },
     operations: [{ type: 'payment', from: PAYER_PK, to: SELLER_PK, amount: '100.0000000', asset_type: 'native' }],
   },
   {
@@ -292,7 +349,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetIssuer: USDC_ISSUER,
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text' },
     operations: [
       {
         type: 'payment',
@@ -323,7 +380,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text' },
     operations: [{ type: 'payment', from: PAYER_PK, to: SELLER_PK, amount: '100.0000000', asset_type: 'native' }],
   },
 
@@ -342,7 +399,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text' },
     operations: [{ type: 'manage_data', from: PAYER_PK }],
   },
 
@@ -361,7 +418,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-WRONG' },
+    transaction: { memo: 'QUIT-WRONG', memo_type: 'text' },
     operations: [{ type: 'manage_data', from: PAYER_PK }],
   },
 
@@ -380,7 +437,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-WRONG' },
+    transaction: { memo: 'QUIT-WRONG', memo_type: 'text' },
     operations: [{ type: 'payment', from: PAYER_PK, to: OTHER_PK, amount: '100.0000000', asset_type: 'native' }],
   },
 
@@ -399,7 +456,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text' },
     operations: [{ type: 'payment', from: PAYER_PK, to: OTHER_PK, amount: '1.0000000', asset_type: 'native' }],
   },
 
@@ -419,7 +476,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetIssuer: USDC_ISSUER,
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text' },
     operations: [{ type: 'payment', from: PAYER_PK, to: SELLER_PK, amount: '1.0000000', asset_type: 'native' }],
   },
 
@@ -439,7 +496,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001', created_at: '2026-09-20T12:00:00Z' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text', created_at: '2026-09-20T12:00:00Z' },
     operations: [
       { type: 'manage_data', from: PAYER_PK },
       { type: 'payment', from: PAYER_PK, to: SELLER_PK, amount: '100.0000000', asset_type: 'native' },
@@ -460,7 +517,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001', created_at: '2026-09-20T12:00:00Z' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text', created_at: '2026-09-20T12:00:00Z' },
     operations: [
       {
         type: 'path_payment_strict_receive',
@@ -486,7 +543,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001', created_at: '2026-09-20T12:00:00Z' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text', created_at: '2026-09-20T12:00:00Z' },
     operations: [
       {
         type: 'path_payment_strict_send',
@@ -513,7 +570,7 @@ export const VERIFICATION_FIXTURES: VerificationFixture[] = [
       assetCode: 'XLM',
       network: 'TESTNET',
     },
-    transaction: { memo: 'QUIT-1001', created_at: '2026-09-20T12:00:00Z' },
+    transaction: { memo: 'QUIT-1001', memo_type: 'text', created_at: '2026-09-20T12:00:00Z' },
     operations: [
       {
         type: 'payment',

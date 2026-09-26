@@ -219,7 +219,7 @@ function paymentTransaction(overrides: {
   assetCode?: string;
 }) {
   return {
-    transaction: { memo: overrides.memo },
+    transaction: { memo: overrides.memo, memo_type: 'text' },
     operations: [
       {
         type: 'payment',
@@ -310,7 +310,7 @@ function runSharedBackendSuite(name: string, createStorage: () => InvoiceStorage
       assert.equal(got.body.data.customerEmail, customerEmail);
 
       transaction = {
-        transaction: { memo: created.memo },
+        transaction: { memo: created.memo, memo_type: 'text' },
         operations: [
           {
             type: 'payment',

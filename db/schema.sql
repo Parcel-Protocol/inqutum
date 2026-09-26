@@ -143,6 +143,23 @@ CREATE INDEX IF NOT EXISTS idx_invoices_created_at ON invoices(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_invoices_seller_created_at ON invoices(seller_public_key, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_invoices_pending_expiry ON invoices(expires_at) WHERE status = 'PENDING';
 CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_keys(expires_at);
+-- One Stellar transaction settles at most one invoice (issue #14). The database,
+-- not just the in-process claim index, refuses a second invoice carrying the same
+-- payment_tx_hash, even across instances and restarts. Partial: pending, expired
+-- and cancelled invoices have no hash and never collide. If an older database
+-- already holds duplicates, stop with a readable message instead of a bare index
+-- error; those rows are double-settlements and must be resolved by hand.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM invoices WHERE payment_tx_hash IS NOT NULL
+    GROUP BY payment_tx_hash HAVING COUNT(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'invoices.payment_tx_hash has duplicates; resolve them before applying idx_invoices_payment_tx_hash_unique';
+  END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_payment_tx_hash_unique
+  ON invoices(payment_tx_hash) WHERE payment_tx_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_transactions_tx_hash ON transactions(tx_hash);
 CREATE INDEX IF NOT EXISTS idx_transactions_invoice_id ON transactions(invoice_id);
 

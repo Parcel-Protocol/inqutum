@@ -133,3 +133,28 @@ sign-in is not configured.
 carry a per-request seller signature. It is an extra proof on top of the session,
 not a replacement. The session is what identifies the seller; a `sellerPublicKey`
 in the request body that names someone else is refused.
+
+## Data model: wallet-scoped invoices (issue #14)
+
+The owning wallet of an invoice is `invoices.seller_public_key` (the name is shared
+with the API and the memory backend; it is the "owner wallet address"). It is a
+*public* key, so knowing it proves nothing. What makes a dashboard private is the
+wallet **session** above, not the address: `GET /invoices?sellerPublicKey=G...` for a
+wallet other than the session's answers `403 FORBIDDEN` and returns no rows, pinned
+by "a seller cannot list another seller's invoices by editing the query" in
+`backend/tests/access-control.test.ts`. Maintainers and services are the only
+cross-wallet readers.
+
+| Column | Purpose |
+| ------ | ------- |
+| `seller_public_key` (indexed; `idx_invoices_seller_created_at` serves the dashboard) | owning wallet |
+| `amount`, `asset_code`, `asset_issuer` | what must be paid ([ASSETS.md](./ASSETS.md)) |
+| `memo` (`UNIQUE NOT NULL`) | text memo matched by verification (spec in `backend/src/utils/memo-compare.ts`) |
+| `customer_email`, `description`, `metadata` | optional |
+| `status`, `expires_at`, `cancelled_at` | lifecycle ([LIFECYCLE.md](./LIFECYCLE.md)) |
+| `payment_tx_hash` (**partial `UNIQUE`**), `payer_public_key`, `paid_at`, `settled_at` | verification metadata |
+
+`payment_tx_hash` is unique among non-NULL values, enforced by the database: one
+Stellar transaction settles at most one invoice, across instances and restarts
+([VERIFY-IDEMPOTENCY.md](./VERIFY-IDEMPOTENCY.md)).
+

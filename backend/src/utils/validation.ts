@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import * as StellarSdk from '@stellar/stellar-sdk';
 import {
   DEFAULT_INVOICE_EXPIRY_DAYS,
   MAX_INVOICE_EXPIRY_DAYS,
@@ -27,11 +28,34 @@ export const stellarPublicKeySchema = z.string()
  * accepting it at creation would only produce an invoice that can never be
  * paid. `XLM` is the exception: it is the native asset and has no issuer.
  */
+/**
+ * Issuer of a credit asset (issue #8): a well-formed Ed25519 strkey, including
+ * its checksum. Case is NOT normalized: strkeys are canonical uppercase base32
+ * and a key in any other case is a different (invalid) string, so it is
+ * rejected rather than "fixed".
+ */
+export const assetIssuerSchema = stellarPublicKeySchema.refine(
+  (key) => StellarSdk.StrKey.isValidEd25519PublicKey(key),
+  'Invalid Stellar issuer key (checksum failed)',
+);
+
+/**
+ * Asset code as typed by a seller (issue #8). This is the friendly half of the
+ * create/verify split: surrounding whitespace is trimmed and the code is
+ * uppercased ("usdc" -> "USDC", the Stellar convention), then checked against
+ * the protocol's 1-12 character alphanumeric shape. Verification, by contrast,
+ * compares the stored code and issuer byte-for-byte with no normalization.
+ */
+export const assetCodeSchema = z
+  .string()
+  .transform((code) => code.trim().toUpperCase())
+  .pipe(z.string().regex(/^[A-Z0-9]{1,12}$/, 'Asset code must be 1-12 letters or digits'));
+
 export const createInvoiceSchema = z
   .object({
     amount: z.number().positive().max(1000000000),
-    assetCode: z.string().default('XLM').transform((val) => val.toUpperCase()).optional(),
-    assetIssuer: stellarPublicKeySchema.optional(),
+    assetCode: assetCodeSchema.default('XLM').optional(),
+    assetIssuer: assetIssuerSchema.optional(),
     description: z.string().max(500).optional(),
     customerName: z.string().max(255).optional(),
     customerEmail: z.string().email().optional(),

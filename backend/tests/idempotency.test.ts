@@ -694,7 +694,7 @@ describe('idempotency on the invoice write paths', () => {
       async getTransaction() {
         lookups += 1;
         return {
-          transaction: { memo: memoOf },
+          transaction: { memo: memoOf, memo_type: 'text' },
           operations: [{ type: 'payment', from: PAYER, to: seller.publicKey(), amount: '5.0000000', asset_type: 'native' }],
         };
       },
@@ -728,7 +728,7 @@ describe('idempotency on the invoice write paths', () => {
         lookups += 1;
         if (!visible) throw new Error('not found');
         return {
-          transaction: { memo: memoOf },
+          transaction: { memo: memoOf, memo_type: 'text' },
           operations: [{ type: 'payment', from: PAYER, to: seller.publicKey(), amount: '5.0000000', asset_type: 'native' }],
         };
       },
