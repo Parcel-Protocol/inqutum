@@ -20,9 +20,25 @@ const DEFAULT_CONFIG: EmailRateLimitConfig = {
 
 const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
 
+export const DISPOSABLE_DOMAINS = new Set<string>([
+  'mailinator.com',
+  'tempmail.com',
+  'guerrillamail.com',
+  '10minutemail.com',
+  'throwawaymail.com',
+  'trashmail.com',
+  'yopmail.com',
+  'sharklasers.com',
+  'getairmail.com',
+  'dispostable.com',
+  'temp-mail.org',
+  'fakeinbox.com',
+]);
+
 export class EmailAntiSpamService {
   private config: EmailRateLimitConfig;
   private walletSendTimestamps: Map<string, number[]> = new Map();
+  private blockedEmails: Set<string> = new Set();
   private metrics: {
     totalSent: number;
     totalDelivered: number;
@@ -44,7 +60,36 @@ export class EmailAntiSpamService {
   }
 
   /**
-   * Validate email address for RFC compliance and check for carriage return / line feed injection.
+   * Block a specific email address from receiving demo emails (opt-out / abuse).
+   */
+  public blockEmail(email: string): void {
+    if (typeof email === 'string' && email.trim()) {
+      this.blockedEmails.add(email.trim().toLowerCase());
+    }
+  }
+
+  public unblockEmail(email: string): void {
+    if (typeof email === 'string' && email.trim()) {
+      this.blockedEmails.delete(email.trim().toLowerCase());
+    }
+  }
+
+  public isEmailBlocked(email: string): boolean {
+    if (typeof email !== 'string') return false;
+    return this.blockedEmails.has(email.trim().toLowerCase());
+  }
+
+  public isDisposableDomain(emailOrDomain: string): boolean {
+    if (!emailOrDomain) return false;
+    const domain = emailOrDomain.includes('@')
+      ? emailOrDomain.split('@').pop()?.toLowerCase().trim() || ''
+      : emailOrDomain.toLowerCase().trim();
+    return DISPOSABLE_DOMAINS.has(domain);
+  }
+
+  /**
+   * Validate email address for RFC compliance and check for carriage return / line feed injection,
+   * disposable domains, and blocklist inclusion.
    */
   public validateRecipient(email: unknown): { valid: boolean; error?: string; normalized?: string } {
     if (typeof email !== 'string' || !email.trim()) {
@@ -65,7 +110,24 @@ export class EmailAntiSpamService {
       return { valid: false, error: 'Invalid email address format' };
     }
 
-    return { valid: true, normalized: trimmed.toLowerCase() };
+    const normalized = trimmed.toLowerCase();
+    const domain = normalized.split('@')[1];
+
+    if (this.isDisposableDomain(domain)) {
+      return {
+        valid: false,
+        error: 'Disposable and temporary email addresses are not permitted on the public demo',
+      };
+    }
+
+    if (this.isEmailBlocked(normalized)) {
+      return {
+        valid: false,
+        error: 'Recipient email address has opted out or is on the blocked list',
+      };
+    }
+
+    return { valid: true, normalized };
   }
 
   /**
@@ -190,6 +252,7 @@ export class EmailAntiSpamService {
 
   public resetAll(): void {
     this.walletSendTimestamps.clear();
+    this.blockedEmails.clear();
     this.metrics = {
       totalSent: 0,
       totalDelivered: 0,

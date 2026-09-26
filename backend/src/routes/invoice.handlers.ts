@@ -34,9 +34,18 @@ import { mayAccessSeller, sendForbiddenOwnership } from '../middleware/access-co
 import { checkInvoiceVerifyLimit } from '../middleware/rate-limit';
 import { cacheVerificationResult } from '../middleware/verify-cache';
 import { verifySellerSignature } from '../utils/signature-verification';
+import { emailAntiSpamService } from '../services/email-anti-spam.service';
 
 /** Kept explicit so clients can tune polling without duplicating backend policy. */
 export const PAYMENT_STATUS_POLL_INTERVAL_MS = 3000;
+
+/** Masks email for privacy (Issue #33 demo PII protection). */
+export function maskEmail(email?: string): string | undefined {
+  if (!email || typeof email !== 'string') return email;
+  const at = email.indexOf('@');
+  if (at <= 1) return '***' + email.slice(at);
+  return `${email[0]}***${email.slice(at)}`;
+}
 
 /** Only the part of the Stellar service the verify handler needs. */
 export interface TransactionLookup {
@@ -181,6 +190,38 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         if (validatedData.network && validatedData.network !== STELLAR_NETWORK) {
           return sendFailure(res, 400, 'Client wallet network does not match the server Stellar network');
         }
+
+        // Demo abuse prevention (Issue #31): Reject disposable email addresses for customer notifications
+        if (validatedData.customerEmail && emailAntiSpamService.isDisposableDomain(validatedData.customerEmail)) {
+          return sendFailure(
+            res,
+            400,
+            'Disposable and temporary email addresses are not permitted on the demo platform',
+            'DISPOSABLE_EMAIL_REJECTED'
+          );
+        }
+
+        // Demo abuse prevention (Issue #31): Enforce max pending invoices per wallet
+        const maxPendingEnv = process.env.MAX_PENDING_INVOICES_PER_SELLER;
+        if (maxPendingEnv) {
+          const maxPending = parseInt(maxPendingEnv, 10);
+          try {
+            const pendingInvoices = await storage.getInvoicesBySeller(validatedData.sellerPublicKey, 'PENDING');
+            if (pendingInvoices.length >= maxPending) {
+              return sendFailure(
+                res,
+                429,
+                `Pending invoice limit reached for this wallet (${maxPending}). Please settle or cancel open invoices before creating new ones.`,
+                'PENDING_INVOICE_LIMIT_EXCEEDED'
+              );
+            }
+          } catch (e: any) {
+            if (!/Unhandled query/i.test(e.message)) {
+              throw e;
+            }
+          }
+        }
+
         const invoice = await storage.createInvoice(validatedData);
         const payment = await buildPaymentPayload(invoice);
 

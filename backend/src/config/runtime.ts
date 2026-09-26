@@ -45,6 +45,18 @@ export function simulationAllowed(env: RuntimeEnvironment = process.env): boolea
   return env.NODE_ENV !== 'production' && env.ALLOW_SIMULATE === 'true';
 }
 
+/**
+ * Hard fail at boot if sensitive simulation flags are set in production environments.
+ * Prevents catastrophic fake-payment exposure on live deployments.
+ */
+export function assertSafeEnvironment(env: RuntimeEnvironment = process.env): void {
+  if (env.NODE_ENV === 'production' && env.ALLOW_SIMULATE === 'true') {
+    throw new Error(
+      'CRITICAL SECURITY CONFIGURATION ERROR: ALLOW_SIMULATE=true is strictly forbidden when NODE_ENV=production. Refusing to boot server.'
+    );
+  }
+}
+
 export function deploymentReadiness(
   env: RuntimeEnvironment = process.env
 ): ReadinessCheck {

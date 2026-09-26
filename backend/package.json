@@ -21,6 +21,7 @@
     "db:seed": "tsx src/db/seed.ts",
     "cutover": "tsx scripts/cutover.ts",
     "reconcile": "tsx scripts/reconcile.ts",
+    "purge:demo": "tsx scripts/purge-demo-data.ts",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

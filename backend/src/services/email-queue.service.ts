@@ -72,6 +72,7 @@ export class EmailQueueService {
   private antiSpam: EmailAntiSpamService;
   private transporter: EmailTransporter;
   private retryConfig: EmailRetryConfig;
+  private maxEmailsPerInvoice: number;
   private timer: NodeJS.Timeout | null = null;
   private isProcessing = false;
 
@@ -80,11 +81,15 @@ export class EmailQueueService {
     antiSpam?: EmailAntiSpamService;
     transporter?: EmailTransporter;
     retryConfig?: Partial<EmailRetryConfig>;
+    maxEmailsPerInvoice?: number;
   } = {}) {
     this.storage = options.storage || memoryEmailDeliveryStorage;
     this.antiSpam = options.antiSpam || emailAntiSpamService;
     this.transporter = options.transporter || new MockTransporter();
     this.retryConfig = { ...DEFAULT_RETRY_CONFIG, ...options.retryConfig };
+    this.maxEmailsPerInvoice =
+      options.maxEmailsPerInvoice ??
+      parseInt(process.env.MAX_EMAILS_PER_INVOICE || '5', 10);
   }
 
   public setStorage(storage: EmailDeliveryStorage): void {
@@ -121,6 +126,16 @@ export class EmailQueueService {
         code: 'EMAIL_RATE_LIMIT_EXCEEDED',
         error: `Outbound email rate limit exceeded for wallet (${rateCheck.currentCount}/${rateCheck.maxAllowed} per hour)`,
         retryAfterSeconds: rateCheck.retryAfterSeconds,
+      };
+    }
+
+    // Per-invoice email cap (Issue #31): Enforce max outbound emails per invoice to prevent spam relays
+    const existingDeliveries = await this.storage.listDeliveries({ invoiceId: input.invoiceId });
+    if (existingDeliveries.length >= this.maxEmailsPerInvoice) {
+      return {
+        success: false,
+        code: 'EXCEEDED_INVOICE_EMAIL_LIMIT',
+        error: `Maximum email notification limit reached for this invoice (${this.maxEmailsPerInvoice} per invoice)`,
       };
     }
 

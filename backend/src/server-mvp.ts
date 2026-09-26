@@ -14,7 +14,7 @@ import paymentMonitorService from './services/payment-monitor.service';
 import { createPaymentMonitorRouter } from './routes/payment-monitor.routes';
 import { FilePaymentMonitorCheckpointStore } from './services/payment-monitor-checkpoint';
 import { SELLER_PUBLIC_KEY } from './config/stellar';
-import { configuredFrontendOrigins, corsOptions } from './config/runtime';
+import { assertSafeEnvironment, configuredFrontendOrigins, corsOptions } from './config/runtime';
 import { healthHandler, readinessHandler } from './health';
 import { createAuthRouter } from './routes/auth.routes';
 import { createReconciliationRouter } from './routes/reconciliation.routes';
@@ -22,6 +22,7 @@ import { createEmailRouter } from './routes/email.routes';
 import { authenticate, requirePermission } from './middleware/access-control';
 
 dotenv.config();
+assertSafeEnvironment();
 
 paymentMonitorService.configure({
   invoices: invoiceMemoryService,

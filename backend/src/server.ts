@@ -5,10 +5,11 @@ import routes from './routes';
 import { pool } from './config/database';
 import { validateStellarConfig, SELLER_PUBLIC_KEY } from './config/stellar';
 import paymentMonitorService from './services/payment-monitor.service';
-import { configuredFrontendOrigins, corsOptions } from './config/runtime';
+import { assertSafeEnvironment, configuredFrontendOrigins, corsOptions } from './config/runtime';
 import postgresInvoiceStorage from './storage/postgres-invoice-storage';
 
 dotenv.config();
+assertSafeEnvironment();
 
 const app: Application = express();
 const PORT = process.env.PORT || 3001;

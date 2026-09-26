@@ -573,6 +573,17 @@ export class InvoiceService {
     const res = await this.db.query('SELECT COUNT(*) as count FROM invoices');
     return parseInt(res.rows[0]?.count || '0', 10);
   }
+
+  async purgeStaleInvoices(options: { maxAgeHours: number; statuses?: any[] }): Promise<number> {
+    const cutoff = new Date(Date.now() - options.maxAgeHours * 3600 * 1000);
+    const res = await this.db.query(
+      `DELETE FROM invoices
+       WHERE created_at <= $1
+         AND (status IN ('PAID', 'EXPIRED', 'CANCELLED') OR (status = 'PENDING' AND expires_at <= NOW()))`,
+      [cutoff]
+    );
+    return res.rowCount || 0;
+  }
 }
 
 export default new InvoiceService();
