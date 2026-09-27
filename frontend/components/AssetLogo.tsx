@@ -20,6 +20,18 @@ interface AssetLogoProps {
   decorative?: boolean;
 }
 
+function validateAssetCode(code: unknown): string {
+  if (typeof code === 'string' && code.length > 0) {
+    return code.toUpperCase();
+  }
+  return 'XLM';
+}
+
+function validateSize(size: unknown): number {
+  const num = typeof size === 'number' ? size : 24;
+  return num > 0 && num <= 512 ? num : 24;
+}
+
 export default function AssetLogo({
   code,
   size = 24,
@@ -27,7 +39,8 @@ export default function AssetLogo({
   className = '',
   decorative = false,
 }: AssetLogoProps) {
-  const normalizedCode = code ? code.toUpperCase() : 'XLM';
+  const normalizedCode = validateAssetCode(code);
+  const validatedSize = validateSize(size);
   const asset = getAssetByCode(normalizedCode);
 
   if (!asset) {
@@ -47,20 +60,18 @@ export default function AssetLogo({
       <div
         className="rounded-full overflow-hidden flex items-center justify-center bg-white shadow-sm border border-gray-100"
         style={{
-          width: size,
-          height: size,
-          minWidth: size,
-          minHeight: size,
+          width: validatedSize,
+          height: validatedSize,
+          minWidth: validatedSize,
+          minHeight: validatedSize,
           padding: '2px'
         }}
       >
         <Image
           src={asset.logo}
-          // A decorative logo carries an empty alt so it is skipped outright
-          // rather than announced as an unlabelled image.
           alt={decorative ? '' : asset.name}
-          width={size - 4}
-          height={size - 4}
+          width={Math.max(validatedSize - 4, 1)}
+          height={Math.max(validatedSize - 4, 1)}
           className="object-contain rounded-full"
           unoptimized
           priority
