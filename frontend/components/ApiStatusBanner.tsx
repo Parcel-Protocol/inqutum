@@ -4,32 +4,48 @@ import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, ServerOff, X } from 'lucide-react';
 import { API_CONFIG, apiErrorMessage, healthCheck } from '@/lib/api';
 
+function validateErrorMessage(message: unknown): string | null {
+  return typeof message === 'string' && message.length > 0 ? message : null;
+}
+
 export default function ApiStatusBanner() {
-  const [error, setError] = useState<string | null>(API_CONFIG.error);
+  const [error, setError] = useState<string | null>(() => {
+    const initial = API_CONFIG.error;
+    return validateErrorMessage(initial);
+  });
   const [checking, setChecking] = useState(false);
 
   const check = useCallback(async () => {
+    if (checking) return;
     setChecking(true);
     try {
       await healthCheck();
       setError(null);
     } catch (cause) {
-      setError(apiErrorMessage(cause));
+      const message = apiErrorMessage(cause);
+      setError(validateErrorMessage(message));
     } finally {
       setChecking(false);
     }
-  }, []);
+  }, [checking]);
 
   useEffect(() => {
     void check();
-    const offline = () => setError('Your browser is offline. Reconnect, then retry.');
-    const online = () => void check();
-    window.addEventListener('offline', offline);
-    window.addEventListener('online', online);
-    return () => {
-      window.removeEventListener('offline', offline);
-      window.removeEventListener('online', online);
+    const offline = () => {
+      setError('Your browser is offline. Reconnect, then retry.');
     };
+    const online = () => {
+      void check();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('offline', offline);
+      window.addEventListener('online', online);
+      return () => {
+        window.removeEventListener('offline', offline);
+        window.removeEventListener('online', online);
+      };
+    }
   }, [check]);
 
   if (!error) return null;
