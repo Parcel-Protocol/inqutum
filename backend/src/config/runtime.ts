@@ -41,18 +41,36 @@ export function configuredFrontendOrigins(
   return [...new Set(origins)];
 }
 
+export function isDemoEnvironment(env: RuntimeEnvironment = process.env): boolean {
+  return env.DEMO_MODE === 'true' || env.PUBLIC_DEMO === 'true' || env.NODE_ENV === 'demo';
+}
+
 export function simulationAllowed(env: RuntimeEnvironment = process.env): boolean {
-  return env.NODE_ENV !== 'production' && env.ALLOW_SIMULATE === 'true';
+  return (
+    env.NODE_ENV !== 'production' &&
+    env.NODE_ENV !== 'demo' &&
+    env.DEMO_MODE !== 'true' &&
+    env.PUBLIC_DEMO !== 'true' &&
+    env.ALLOW_SIMULATE === 'true'
+  );
 }
 
 /**
- * Hard fail at boot if sensitive simulation flags are set in production environments.
+ * Hard fail at boot if sensitive simulation flags are set in production or public demo environments.
  * Prevents catastrophic fake-payment exposure on live deployments.
  */
 export function assertSafeEnvironment(env: RuntimeEnvironment = process.env): void {
   if (env.NODE_ENV === 'production' && env.ALLOW_SIMULATE === 'true') {
     throw new Error(
       'CRITICAL SECURITY CONFIGURATION ERROR: ALLOW_SIMULATE=true is strictly forbidden when NODE_ENV=production. Refusing to boot server.'
+    );
+  }
+  if (
+    (env.DEMO_MODE === 'true' || env.PUBLIC_DEMO === 'true' || env.NODE_ENV === 'demo') &&
+    env.ALLOW_SIMULATE === 'true'
+  ) {
+    throw new Error(
+      'CRITICAL SECURITY CONFIGURATION ERROR: ALLOW_SIMULATE=true is strictly forbidden in public demo environments. Refusing to boot server.'
     );
   }
 }

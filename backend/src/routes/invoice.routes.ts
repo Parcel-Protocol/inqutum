@@ -14,6 +14,7 @@ import {
   verifyConcurrencyLock,
 } from '../middleware/rate-limit';
 import { createInvoiceCeilingMiddleware } from '../middleware/invoice-ceiling';
+import { isDemoEnvironment } from '../config/runtime';
 
 export interface InvoiceRouterOptions extends InvoiceHandlerOptions {
   enableRateLimiting?: boolean;
@@ -63,18 +64,20 @@ export function createInvoiceRouter(options: InvoiceRouterOptions): Router {
   // per-route guards below decide.
   router.use('/invoices', authenticate());
 
+  const isDemo = isDemoEnvironment();
   const enableRateLimiting =
     options.enableRateLimiting ??
-    (process.env.ENABLE_RATE_LIMITING === 'true' || process.env.NODE_ENV === 'production');
+    (process.env.ENABLE_RATE_LIMITING === 'true' || process.env.NODE_ENV === 'production' || isDemo);
 
   const enableConcurrencyLock =
     options.enableConcurrencyLock ??
-    (process.env.ENABLE_VERIFY_CONCURRENCY_LOCK === 'true' || process.env.NODE_ENV === 'production');
+    (process.env.ENABLE_VERIFY_CONCURRENCY_LOCK === 'true' || process.env.NODE_ENV === 'production' || isDemo);
 
   const enableCeilingCheck =
     options.enableCeilingCheck ??
     (process.env.ENABLE_INVOICE_CEILING === 'true' ||
       process.env.NODE_ENV === 'production' ||
+      isDemo ||
       options.invoiceCeiling !== undefined);
 
   const createMiddlewares: RequestHandler[] = [];

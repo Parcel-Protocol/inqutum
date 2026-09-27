@@ -24,7 +24,7 @@ import {
   SettlementTimeUnavailableError,
   warningForLatePayment,
 } from '../domain/invoice-settlement';
-import { cutoverDrainMode, simulationAllowed } from '../config/runtime';
+import { cutoverDrainMode, simulationAllowed, isDemoEnvironment } from '../config/runtime';
 import { createRequestId } from '../utils/request-correlation-id';
 import {
   InvalidTransitionError,
@@ -202,9 +202,10 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         }
 
         // Demo abuse prevention (Issue #31): Enforce max pending invoices per wallet
-        const maxPendingEnv = process.env.MAX_PENDING_INVOICES_PER_SELLER;
-        if (maxPendingEnv) {
-          const maxPending = parseInt(maxPendingEnv, 10);
+        const maxPending = process.env.MAX_PENDING_INVOICES_PER_SELLER
+          ? parseInt(process.env.MAX_PENDING_INVOICES_PER_SELLER, 10)
+          : (isDemoEnvironment() ? 25 : undefined);
+        if (maxPending !== undefined) {
           try {
             const pendingInvoices = await storage.getInvoicesBySeller(validatedData.sellerPublicKey, 'PENDING');
             if (pendingInvoices.length >= maxPending) {

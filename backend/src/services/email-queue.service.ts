@@ -119,6 +119,13 @@ export class EmailQueueService {
       return { success: false, code: 'INVALID_RECIPIENT_EMAIL', error: val.error };
     }
 
+    const contentCheck = this.antiSpam.validateContent(
+      `${input.subject || ''} ${input.payload?.text || ''}`
+    );
+    if (!contentCheck.valid) {
+      return { success: false, code: 'SPAM_CONTENT_REJECTED', error: contentCheck.error };
+    }
+
     const rateCheck = this.antiSpam.checkWalletRateLimit(input.senderWallet);
     if (!rateCheck.allowed) {
       return {

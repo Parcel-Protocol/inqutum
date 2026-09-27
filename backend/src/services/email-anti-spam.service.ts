@@ -131,6 +131,35 @@ export class EmailAntiSpamService {
   }
 
   /**
+   * Validate free-text message content against prohibited spam keywords / patterns.
+   */
+  public validateContent(content?: string): { valid: boolean; error?: string } {
+    if (!content || typeof content !== 'string') {
+      return { valid: true };
+    }
+    const lower = content.toLowerCase();
+    const spamPatterns = [
+      'viagra',
+      'cialis',
+      'casino',
+      'lottery winner',
+      'free money',
+      'cryptocurrency giveaway',
+      'claim your reward now',
+      'inheritance fund',
+    ];
+    for (const pattern of spamPatterns) {
+      if (lower.includes(pattern)) {
+        return {
+          valid: false,
+          error: `Prohibited spam or abuse content detected: "${pattern}"`,
+        };
+      }
+    }
+    return { valid: true };
+  }
+
+  /**
    * Check if a wallet is allowed to send an outbound email under the per-wallet rate limit.
    */
   public checkWalletRateLimit(

@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { assertSafeEnvironment, simulationAllowed } from '../src/config/runtime';
+import { assertSafeEnvironment, simulationAllowed, isDemoEnvironment } from '../src/config/runtime';
 import { MemoryStorage } from '../src/storage/memory-storage';
 import { emailAntiSpamService } from '../src/services/email-anti-spam.service';
 import { EmailQueueService } from '../src/services/email-queue.service';
@@ -45,6 +45,34 @@ describe('Phase D: Issues #31, #33, #34 Tests', () => {
       });
       assert.equal(simulationAllowed({ NODE_ENV: 'development', ALLOW_SIMULATE: 'true' }), true);
       assert.equal(simulationAllowed({ NODE_ENV: 'production', ALLOW_SIMULATE: 'true' }), false);
+    });
+
+    it('refuses to boot with ALLOW_SIMULATE=true in public demo environments', () => {
+      assert.throws(
+        () => {
+          assertSafeEnvironment({
+            DEMO_MODE: 'true',
+            ALLOW_SIMULATE: 'true',
+          });
+        },
+        /CRITICAL SECURITY CONFIGURATION ERROR/
+      );
+
+      assert.throws(
+        () => {
+          assertSafeEnvironment({
+            PUBLIC_DEMO: 'true',
+            ALLOW_SIMULATE: 'true',
+          });
+        },
+        /CRITICAL SECURITY CONFIGURATION ERROR/
+      );
+
+      assert.equal(simulationAllowed({ DEMO_MODE: 'true', ALLOW_SIMULATE: 'true' }), false);
+      assert.equal(simulationAllowed({ PUBLIC_DEMO: 'true', ALLOW_SIMULATE: 'true' }), false);
+      assert.equal(isDemoEnvironment({ DEMO_MODE: 'true' }), true);
+      assert.equal(isDemoEnvironment({ PUBLIC_DEMO: 'true' }), true);
+      assert.equal(isDemoEnvironment({ NODE_ENV: 'production' }), false);
     });
   });
 
@@ -291,6 +319,49 @@ describe('Phase D: Issues #31, #33, #34 Tests', () => {
       } finally {
         process.env.MAX_PENDING_INVOICES_PER_SELLER = prevEnv;
       }
+    });
+
+    it('rejects spam or abusive keywords in outbound email content', async () => {
+      const emailStorage = new MemoryEmailDeliveryStorage();
+      const queue = new EmailQueueService({
+        storage: emailStorage,
+        antiSpam: emailAntiSpamService,
+      });
+
+      const res = await queue.enqueue({
+        invoiceId: 'inv-test-spam-content',
+        recipientEmail: 'client@example.com',
+        senderWallet: 'GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3IFBS7PR5ST4',
+        emailType: 'INVOICE_SENT',
+        subject: 'Claim free money and cryptocurrency giveaway now',
+      });
+
+      assert.equal(res.success, false);
+      assert.equal(res.code, 'SPAM_CONTENT_REJECTED');
+      assert.match(res.error!, /Prohibited spam or abuse content/);
+    });
+
+    it('blocks email delivery to opted-out or abuse-reported recipients', async () => {
+      const emailStorage = new MemoryEmailDeliveryStorage();
+      const queue = new EmailQueueService({
+        storage: emailStorage,
+        antiSpam: emailAntiSpamService,
+      });
+
+      const recipient = 'victim-reporting-abuse@example.com';
+      emailAntiSpamService.blockEmail(recipient);
+
+      const res = await queue.enqueue({
+        invoiceId: 'inv-test-opted-out',
+        recipientEmail: recipient,
+        senderWallet: 'GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3IFBS7PR5ST4',
+        emailType: 'INVOICE_SENT',
+        subject: 'Legitimate Invoice',
+      });
+
+      assert.equal(res.success, false);
+      assert.equal(res.code, 'INVALID_RECIPIENT_EMAIL');
+      assert.match(res.error!, /opted out or is on the blocked list/);
     });
   });
 });

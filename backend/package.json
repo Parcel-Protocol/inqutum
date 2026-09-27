@@ -23,6 +23,7 @@
     "reconcile": "tsx scripts/reconcile.ts",
     "purge:demo": "tsx scripts/purge-demo-data.ts",
     "validate:dr": "tsx src/ops/dr-validate-cli.ts",
+    "verify:security": "tsx -e \"import { assertSafeEnvironment } from './src/config/runtime.ts'; import assert from 'node:assert'; assert.throws(() => assertSafeEnvironment({ NODE_ENV: 'production', ALLOW_SIMULATE: 'true' })); assert.throws(() => assertSafeEnvironment({ DEMO_MODE: 'true', ALLOW_SIMULATE: 'true' })); console.log('✓ Security simulation lockout verified');\"",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

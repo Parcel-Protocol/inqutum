@@ -82,4 +82,17 @@ if (!invoice?.id || invoice.status !== 'PENDING') throw new Error('Create invoic
 const fetched = await request(`/invoices/${invoice.id}`);
 if (fetched?.data?.id !== invoice.id) throw new Error('Created invoice could not be read back');
 
+// Security invariant (Issue #34): verify simulate-payment endpoint is completely disabled/hidden in deployment
+const simCheck = await fetch(`${baseUrl}/invoices/${invoice.id}/simulate-payment`, {
+  method: 'POST',
+  headers: {
+    authorization: `Bearer ${token}`,
+  },
+});
+if (simCheck.status !== 404) {
+  throw new Error(
+    `CRITICAL SECURITY VIOLATION: simulate-payment returned HTTP ${simCheck.status} instead of 404 on deployment!`
+  );
+}
+
 console.log(`Deploy smoke passed: ${baseUrl} (${invoice.id})`);

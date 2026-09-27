@@ -28,9 +28,12 @@ This document formalizes the multi-layered abuse defenses enforced across all pu
 
 To prevent the demo from being flagged by email reputation systems (Spamhaus, Google Postmaster, Microsoft SNDS):
 1. **Domain Verification**: Inbound recipient emails must conform to standard RFC format and cannot belong to known disposable email hosts.
-2. **Per-Invoice Email Ceiling**: An invoice cannot be used to send more than 3 emails in total. This strictly bounds third-party notification spam even if an attacker generates multiple send requests.
-3. **Blocklist / Opt-out Management**: Any recipient can be permanently blocked from demo emails via `emailAntiSpamService.blockEmail(recipient)`.
-4. **Automated Breaker Trip**: If test emails bounce or trigger complaints exceeding thresholds, the email queue automatically switches to `PAUSED` mode to preserve delivery reputation.
+2. **Content Moderation**: Outbound email subjects and messages are inspected for spam heuristics, phishing terms, and prohibited keywords (`validateContent()`), rejecting abusive payloads with `400 Bad Request` (`SPAM_CONTENT_REJECTED`).
+3. **Per-Invoice Email Ceiling**: An invoice cannot be used to send more than 3 emails in total. This strictly bounds third-party notification spam even if an attacker generates multiple send requests.
+4. **Blocklist / Opt-out Reporting Mechanism**:
+   - Any recipient can opt out or report demo email abuse via public endpoints `POST /api/email/opt-out` or `POST /api/email/report-abuse` with `{ "email": "victim@example.com" }`.
+   - The address is permanently recorded on the in-memory/persistent blocklist and all subsequent delivery attempts are rejected with `INVALID_RECIPIENT_EMAIL`.
+5. **Automated Breaker Trip**: If test emails bounce or trigger complaints exceeding thresholds, the email queue automatically switches to `PAUSED` mode to preserve delivery reputation.
 
 ## 4. Operational Monitoring
 

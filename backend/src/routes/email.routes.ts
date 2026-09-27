@@ -202,6 +202,30 @@ export function createEmailRouter(options: EmailRouterOptions): Router {
     }
   );
 
+  /**
+   * POST /email/opt-out & POST /email/report-abuse
+   * Public reporting / block mechanism for recipients of unwanted demo-generated emails (Issue #31).
+   */
+  const handleOptOut = (req: Request, res: Response) => {
+    try {
+      const { email, reason } = req.body || {};
+      if (!email || typeof email !== 'string') {
+        return sendFailure(res, 400, 'Valid recipient email is required to opt out', 'INVALID_EMAIL');
+      }
+      const trimmed = email.trim().toLowerCase();
+      antiSpam.blockEmail(trimmed);
+      return sendSuccess(res, 200, { email: trimmed, blocked: true, reason: reason || 'User requested block' }, {
+        message: 'Email address has been successfully blocked from all future demo notifications.',
+      });
+    } catch (error: any) {
+      console.error('Email opt-out error:', error);
+      return sendFailure(res, 500, error.message || 'Failed to process opt-out');
+    }
+  };
+
+  router.post('/email/opt-out', handleOptOut);
+  router.post('/email/report-abuse', handleOptOut);
+
   return router;
 }
 
