@@ -18,6 +18,14 @@ interface QRCodeDisplayProps {
   description?: string;
 }
 
+function validateQrValue(value: unknown): boolean {
+  return typeof value === 'string' && value.length > 0 && value.length <= 4296;
+}
+
+function validateQrSize(size: unknown): boolean {
+  return typeof size === 'number' && size > 0 && size <= 2048;
+}
+
 export default function QRCodeDisplay({
   value,
   title,
@@ -27,7 +35,14 @@ export default function QRCodeDisplay({
 }: QRCodeDisplayProps) {
   const [copied, setCopied] = useState(false);
 
+  const isValidValue = validateQrValue(value);
+  const isValidSize = validateQrSize(size);
+
   const handleCopy = async () => {
+    if (!isValidValue) {
+      toast.error('QR code value is invalid');
+      return;
+    }
     const success = await copyWithFeedback(value);
     if (success) {
       setCopied(true);
@@ -39,7 +54,7 @@ export default function QRCodeDisplay({
   };
 
   // Check if value is a base64 image (from backend)
-  const isBase64Image = value.startsWith('data:image');
+  const isBase64Image = isValidValue && value.startsWith('data:image');
 
   /*
    * A QR code is an image of a link, and "QR Code" as alt text says nothing
@@ -50,13 +65,15 @@ export default function QRCodeDisplay({
    */
   const alternativeText = `QR code containing ${description}. Scan it with a Stellar wallet app, or use the link below.`;
 
-  if (!value) {
+  if (!isValidValue) {
     return (
       <div role="status" className="pay-qr-placeholder">
         Payment QR code is preparing...
       </div>
     );
   }
+
+  const displaySize = isValidSize ? size : 256;
 
   return (
     <div className="flex flex-col items-center gap-4">
@@ -71,8 +88,8 @@ export default function QRCodeDisplay({
           <img
             src={value}
             alt={alternativeText}
-            width={size}
-            height={size}
+            width={displaySize}
+            height={displaySize}
             className="block"
           />
         ) : (
@@ -80,7 +97,7 @@ export default function QRCodeDisplay({
           // an unnamed graphic to assistive technology without these.
           <QRCodeSVG
             value={value}
-            size={size}
+            size={displaySize}
             level="H"
             includeMargin={true}
             role="img"

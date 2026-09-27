@@ -144,7 +144,7 @@ function dashboardDataFor(data, sellerPublicKey, now) {
 /** Sorted revenue pairs. Revenue is never summed across assets. */
 function revenueEntries(stats) {
   const revenue = stats?.revenue_by_asset;
-  if (!revenue || typeof revenue !== 'object') return [];
+  if (!revenue || typeof revenue !== 'object' || Array.isArray(revenue)) return [];
 
   return Object.entries(revenue).sort(([assetA], [assetB]) => assetA.localeCompare(assetB));
 }
