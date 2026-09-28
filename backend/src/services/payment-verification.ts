@@ -21,6 +21,8 @@ import { sanitizePlainText } from '../security/content-safety';
 import { amountsMatch as stroopAmountsMatch } from '../utils/verify-amount-tolerance';
 import { isFeatureEnabled } from '../config/feature-flags';
 
+export const VERIFICATION_CONTRACT_VERSION = '1.0.0';
+
 export type VerificationCode =
   | 'MISSING_TX_HASH'
   | 'INVALID_TX_HASH'

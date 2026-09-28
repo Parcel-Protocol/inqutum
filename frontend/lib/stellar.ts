@@ -5,6 +5,8 @@ import {
   signTransaction,
   isAllowed,
   setAllowed,
+  getNetwork,
+  getNetworkDetails,
 } from '@stellar/freighter-api';
 import { detectFreighter } from './freighter-availability';
 import { explorerTransactionUrl } from './safe-content.js';
@@ -62,24 +64,20 @@ export const describeStellarNetworkError = (error: any): string => {
   return error?.message || 'Stellar network request failed.';
 };
 
+import { freighterAdapter } from './freighter-adapter';
+
 /**
  * Check whether the Freighter extension API is available
  */
 export const checkWalletConnection = async (): Promise<boolean> => {
-  return detectFreighter(isConnected);
+  return await freighterAdapter.detectExtension();
 };
 
 /**
  * Request permission to access wallet
  */
 export const requestWalletAccess = async (): Promise<boolean> => {
-  try {
-    await setAllowed();
-    return await isAllowed();
-  } catch (error) {
-    console.error('Error requesting wallet access:', error);
-    return false;
-  }
+  return await freighterAdapter.requestAccess();
 };
 
 /**
@@ -87,8 +85,7 @@ export const requestWalletAccess = async (): Promise<boolean> => {
  */
 export const getUserPublicKey = async (): Promise<string | null> => {
   try {
-    const publicKey = await getPublicKey();
-    return publicKey;
+    return await freighterAdapter.getPublicKey();
   } catch (error) {
     console.error('Error getting public key:', error);
     return null;
@@ -127,6 +124,55 @@ export const getAccountBalance = async (
 };
 
 /**
+ * Verify Freighter extension is configured on the expected network before building transactions.
+ */
+export const checkFreighterNetwork = async (expectedNetwork: string = STELLAR_NETWORK): Promise<void> => {
+  try {
+    const res = await getNetwork();
+    const walletNetwork = typeof res === 'string' ? res : (res as any)?.network;
+    const walletPassphrase = (res as any)?.networkPassphrase;
+
+    if (walletNetwork && walletNetwork.toUpperCase() !== expectedNetwork.toUpperCase()) {
+      throw new Error(
+        `Freighter wallet network (${walletNetwork.toUpperCase()}) does not match required invoice network (${expectedNetwork.toUpperCase()}). Please switch your wallet to ${expectedNetwork.toUpperCase()} to continue.`
+      );
+    }
+
+    if (walletPassphrase && walletPassphrase !== NETWORK_PASSPHRASE) {
+      throw new Error(
+        `Freighter wallet network passphrase does not match required invoice network passphrase. Please switch your wallet to ${expectedNetwork.toUpperCase()} to continue.`
+      );
+    }
+  } catch (error: any) {
+    if (error.message?.includes('does not match')) {
+      throw error;
+    }
+    // Fallback to getNetworkDetails if getNetwork throws an error or is formatted differently
+    try {
+      const details: any = await getNetworkDetails();
+      const passphrase = details?.networkPassphrase;
+      const netName = details?.network;
+
+      if (netName && netName.toUpperCase() !== expectedNetwork.toUpperCase()) {
+        throw new Error(
+          `Freighter wallet network (${netName.toUpperCase()}) does not match required invoice network (${expectedNetwork.toUpperCase()}). Please switch your wallet to ${expectedNetwork.toUpperCase()} to continue.`
+        );
+      }
+
+      if (passphrase && passphrase !== NETWORK_PASSPHRASE) {
+        throw new Error(
+          `Freighter wallet network passphrase does not match required network passphrase. Please switch your wallet to ${expectedNetwork.toUpperCase()} to continue.`
+        );
+      }
+    } catch (innerError: any) {
+      if (innerError.message?.includes('does not match')) {
+        throw innerError;
+      }
+    }
+  }
+};
+
+/**
  * Send payment with memo
  */
 export const sendPayment = async (
@@ -137,11 +183,11 @@ export const sendPayment = async (
   assetIssuer?: string
 ): Promise<string> => {
   try {
-    // Check wallet connection
-    const connected = await checkWalletConnection();
-    if (!connected) {
-      throw new Error('Wallet not connected');
-    }
+    // Live pre-flight check of connection & authorization (Issue #21)
+    await freighterAdapter.checkConnectionAndAuthorization();
+
+    // Pre-flight Freighter network mismatch check
+    await checkFreighterNetwork(STELLAR_NETWORK);
 
     // Get user public key
     const userPublicKey = await getUserPublicKey();
@@ -190,8 +236,8 @@ export const sendPayment = async (
       .setTimeout(180)
       .build();
 
-    // Sign with Freighter
-    const signedTxXdr = await signTransaction(transaction.toXDR(), {
+    // Sign with Freighter via compatibility adapter (Issue #24)
+    const signedTxXdr = await freighterAdapter.signTransaction(transaction.toXDR(), {
       networkPassphrase: NETWORK_PASSPHRASE,
     });
 

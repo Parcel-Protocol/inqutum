@@ -51,13 +51,16 @@ function fakeDb(state: FakeState): MigrationDatabase {
         const [table, column] = params as [string, string];
         return { rows: state.columns.has(`${table}.${column}`) ? [{ '?column?': 1 }] : [] };
       }
-      if (text.includes('COUNT(*)::int AS count FROM "')) {
-        const table = /FROM "([^"]+)"/.exec(text)?.[1] ?? '';
-        return { rows: [{ count: state.rowCounts[table] ?? 0 }] };
-      }
+      // The backfill probe is a COUNT(*) with a WHERE clause, so it also
+      // matches the generic count prefix below. Match it first, otherwise the
+      // generic branch shadows it and the check always reports "complete".
       if (text.includes('WHERE expires_at IS NULL')) {
         const table = /FROM "([^"]+)"/.exec(text)?.[1] ?? '';
         return { rows: [{ count: state.nullCounts[table] ?? 0 }] };
+      }
+      if (text.includes('COUNT(*)::int AS count FROM "')) {
+        const table = /FROM "([^"]+)"/.exec(text)?.[1] ?? '';
+        return { rows: [{ count: state.rowCounts[table] ?? 0 }] };
       }
       return { rows: [] };
     },

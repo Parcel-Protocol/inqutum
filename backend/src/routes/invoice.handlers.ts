@@ -14,6 +14,7 @@ import { INVOICE_STATUSES, type InvoiceStatus, type InvoiceStorage, type StoredI
 import { decodeInvoiceCursor, encodeInvoiceCursor } from '../storage/invoice-cursor';
 import { STELLAR_NETWORK } from '../config/stellar';
 import {
+  VERIFICATION_CONTRACT_VERSION,
   VERIFICATION_MESSAGES,
   checkInvoiceIsPayable,
   checkPayerInfo,

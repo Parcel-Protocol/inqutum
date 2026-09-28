@@ -48,6 +48,13 @@ export async function buildOpsHealthReport(deps: OpsHealthDeps) {
   const now = deps.now?.() ?? new Date();
   const { samples, scanCap } = OPS_THRESHOLDS;
   const categories: Record<string, Category<Record<string, unknown>>> = {};
+  let telemetryUnavailable = false;
+  let recentLogs: StructuredLogEntry[] = [];
+  try {
+    recentLogs = deps.recentLogs();
+  } catch {
+    telemetryUnavailable = true;
+  }
 
   if (deps.jobs) {
     const [dead, running, queued] = await Promise.all(
@@ -126,6 +133,16 @@ export async function buildOpsHealthReport(deps: OpsHealthDeps) {
       correlationId: log.correlation_id,
     })),
   };
+
+  if (telemetryUnavailable) {
+    categories.telemetry = {
+      count: 1,
+      description:
+        'Recent telemetry could not be read. Job and invoice checks remain available, but server-error visibility is degraded.',
+      link: '/api/observability/metrics',
+      samples: [],
+    };
+  }
 
   const attention = Object.entries(categories)
     .filter(([, category]) => category.count > 0)

@@ -8,6 +8,9 @@ rejection codes stay identical everywhere.
 The module is pure: callers fetch the transaction and its operations from
 Horizon and hand them in.
 
+## Contract Versioning & Change Management
+All verification call sites share a unified version constant `VERIFICATION_CONTRACT_VERSION = '1.0.0'`. See [`docs/adr/001-verification-contract-versioning.md`](./adr/001-verification-contract-versioning.md) for deploy sequence rules and change management guidelines.
+
 ## Order of checks
 
 Checks run in a fixed order so every caller reports the same *first* failure:

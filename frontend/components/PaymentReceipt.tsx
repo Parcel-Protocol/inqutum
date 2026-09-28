@@ -193,14 +193,16 @@ Stellar Blockchain Payment System
 
       <div className="border-t pt-6 space-y-3 print:hidden">
         <button
+          type="button"
           onClick={handleDownloadPDF}
-          className="btn btn-primary w-full flex items-center justify-center gap-2"
+          className="btn btn-primary w-full flex items-center justify-center gap-2 focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" aria-label="Download Payment Proof PDF" aria-haspopup="dialog"
         >
-          <FileText className="w-5 h-5" />
+          <FileText className="w-5 h-5" aria-hidden="true" />
           Download Proof
         </button>
 
         <button
+          type="button"
           onClick={!invoice.customerEmail ? undefined : handleEmailProof}
           disabled={!invoice.customerEmail}
           title={!invoice.customerEmail ? 'No client email on this invoice' : 'Email Proof'}
@@ -208,7 +210,7 @@ Stellar Blockchain Payment System
             !invoice.customerEmail ? 'opacity-50 cursor-not-allowed' : ''
           }`}
         >
-          <Mail className="w-5 h-5" />
+          <Mail className="w-5 h-5" aria-hidden="true" />
           Email Proof
         </button>
 
@@ -218,15 +220,16 @@ Stellar Blockchain Payment System
           rel="noopener noreferrer"
           className="btn btn-outline w-full flex items-center justify-center gap-2"
         >
-          <ExternalLink className="w-5 h-5" />
+          <ExternalLink className="w-5 h-5" aria-hidden="true" />
           View on Stellar Explorer
         </a>
 
         <button
+          type="button"
           onClick={handleDownload}
           className="btn btn-outline w-full flex items-center justify-center gap-2 text-sm"
         >
-          <Download className="w-4 h-4" />
+          <Download className="w-4 h-4" aria-hidden="true" />
           Download TXT receipt
         </button>
       </div>

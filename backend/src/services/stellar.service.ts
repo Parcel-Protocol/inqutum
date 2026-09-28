@@ -1,6 +1,7 @@
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { server, NETWORK_PASSPHRASE, getSellerKeypair } from '../config/stellar';
 import {
+  VERIFICATION_CONTRACT_VERSION,
   checkTxHash,
   failure,
   verifyHorizonPayment,

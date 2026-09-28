@@ -6,6 +6,8 @@
  * surface the exact code/message/recovery guidance the server would return.
  */
 
+const VERIFICATION_CONTRACT_VERSION = '1.0.0';
+
 const VERIFICATION_MESSAGES = {
   MISSING_TX_HASH: 'Transaction hash is required',
   INVALID_TX_HASH: 'Transaction hash must be 64 hexadecimal characters',
@@ -140,6 +142,7 @@ const resolveUserSafeError = (error, fallback = 'An unexpected error occurred') 
 };
 
 module.exports = {
+  VERIFICATION_CONTRACT_VERSION,
   VERIFICATION_MESSAGES,
   RECOVERY_ACTIONS,
   failure,

@@ -420,11 +420,15 @@ describe('verifyHorizonPayment — rejections', () => {
   });
 
   it('rejects a transaction observed on a different network', () => {
-    const result = verifyHorizonPayment(
+    const resultTestnetVsMainnet = verifyHorizonPayment(
       input({ expected: expected({ network: 'PUBLIC' }), network: 'TESTNET' })
     );
+    assert.equal(codeOf(resultTestnetVsMainnet), 'NETWORK_MISMATCH');
 
-    assert.equal(codeOf(result), 'NETWORK_MISMATCH');
+    const resultMainnetVsTestnet = verifyHorizonPayment(
+      input({ expected: expected({ network: 'TESTNET' }), network: 'PUBLIC' })
+    );
+    assert.equal(codeOf(resultMainnetVsTestnet), 'NETWORK_MISMATCH');
   });
 
   it('skips the network guard when either side is unknown', () => {
@@ -566,5 +570,6 @@ describe('shared contract', () => {
     const clientVerification = require('../../frontend/lib/verification.js');
 
     assert.deepEqual(clientVerification.VERIFICATION_MESSAGES, VERIFICATION_MESSAGES);
+    assert.ok(clientVerification.RECOVERY_ACTIONS, 'client verification must define recovery actions');
   });
 });

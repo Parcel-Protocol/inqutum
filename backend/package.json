@@ -19,6 +19,8 @@
     "start:mvp:prod": "node dist/server-mvp.js",
     "deploy:smoke": "node ../scripts/deploy-smoke.mjs",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:validate": "tsx src/db/validate-restore.ts",
+    "db:import": "tsx src/imports/import-cli.ts",
     "db:seed": "tsx src/db/seed.ts",
     "diagnostics": "tsx ../scripts/diagnostics.ts",
     "evidence:pack": "tsx ../scripts/generate-evidence-pack.ts",

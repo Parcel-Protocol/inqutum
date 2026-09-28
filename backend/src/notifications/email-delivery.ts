@@ -125,6 +125,10 @@ export function classifyProviderError(error: unknown): EmailDeliveryError {
     (error as { status?: number })?.status ??
     (error as { statusCode?: number })?.statusCode;
   const haystack = `${code ?? ''} ${message}`.toLowerCase();
+  // Providers report limits as a single camelCase token (`TooManyRequests`,
+  // `DailyLimitExceeded`), which lowercases to a run-together string that no
+  // spaced phrase can match. Compare against a separator-free form as well.
+  const compact = haystack.replace(/[^a-z0-9]/g, '');
 
   if (haystack.includes('unauthorized') || haystack.includes('forbidden') || /\b(401|403)\b/.test(haystack)) {
     return new EmailDeliveryError(message, 'auth', {
@@ -136,9 +140,12 @@ export function classifyProviderError(error: unknown): EmailDeliveryError {
   if (
     haystack.includes('quota') ||
     haystack.includes('rate limit') ||
-    haystack.includes('ratelimit') ||
     haystack.includes('too many requests') ||
     haystack.includes('daily limit') ||
+    compact.includes('toomanyrequests') ||
+    compact.includes('ratelimit') ||
+    compact.includes('quotaexceeded') ||
+    compact.includes('dailylimitexceeded') ||
     /\b429\b/.test(haystack)
   ) {
     return new EmailDeliveryError(message, 'quota', {
@@ -164,7 +171,21 @@ export function classifyProviderError(error: unknown): EmailDeliveryError {
       cause: error,
     });
   }
-  if (/\b5\d\d\b/.test(haystack) || haystack.includes('timeout') || haystack.includes('econnreset') || haystack.includes('socket hang up')) {
+  // SMTP splits its reply codes from HTTP's: 4xx is "try again later", 5xx is a
+  // permanent rejection (550 mailbox unavailable, 551/552/553/554). Both look
+  // like an HTTP 5xx to `/\b5\d\d\b/`, so they must be separated or a permanent
+  // rejection burns every retry before surfacing.
+  const SMTP_PERMANENT = /\b(550|551|552|553|554|555)\b/;
+  if (SMTP_PERMANENT.test(haystack)) {
+    return new EmailDeliveryError(message, 'permanent', { retryable: false, providerCode: String(code ?? ''), cause: error });
+  }
+  if (
+    /\b5\d\d\b/.test(haystack) ||
+    /\b(421|450|451|452)\b/.test(haystack) ||
+    haystack.includes('timeout') ||
+    haystack.includes('econnreset') ||
+    haystack.includes('socket hang up')
+  ) {
     return new EmailDeliveryError(message, 'transient', {
       retryable: true,
       providerCode: String(code ?? ''),

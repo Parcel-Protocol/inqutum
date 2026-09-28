@@ -94,7 +94,19 @@ const strip = (sql: string) => sql.replace(/\s+/g, ' ').trim();
 
 function tableName(after: string): string {
   const match = after.match(/(?:EXISTS\s+)?([A-Za-z_][\w$]*)/i);
-  return match ? match[1] : '';
+  return match ? canonicalIdent(match[1]) : '';
+}
+
+/**
+ * Postgres folds unquoted identifiers to lowercase, so that is the only form
+ * that can be matched against `pg_class.relname` or `information_schema`.
+ * Statement matching runs against the uppercased SQL, so names lifted out of it
+ * have to be folded back here — otherwise the plan reports `INVOICE_STATS` /
+ * `INVOICES.USER_ID` while the live database holds `invoice_stats` /
+ * `invoices.user_id`, and every existence check silently misses.
+ */
+function canonicalIdent(name: string): string {
+  return name.toLowerCase();
 }
 
 /**
@@ -150,7 +162,7 @@ export function parseSchemaSql(sql: string): MigrationPlan {
       if (match) {
         actions.push({
           kind: 'create-view',
-          name: match[1],
+          name: canonicalIdent(match[1]),
           destructive: false,
           touchesData: false,
           sql: statement,
@@ -160,11 +172,13 @@ export function parseSchemaSql(sql: string): MigrationPlan {
     }
 
     if ((match = upper.match(/^ALTER TABLE\s+([A-Za-z_][\w$]*)\s+ADD COLUMN IF NOT EXISTS\s+([A-Za-z_][\w$]*)/))) {
+      const table = canonicalIdent(match[1]);
+      const column = canonicalIdent(match[2]);
       actions.push({
         kind: 'add-column',
-        name: `${match[1]}.${match[2]}`,
-        table: match[1],
-        column: match[2],
+        name: `${table}.${column}`,
+        table,
+        column,
         destructive: false,
         touchesData: false,
         sql: statement,
@@ -173,11 +187,13 @@ export function parseSchemaSql(sql: string): MigrationPlan {
     }
 
     if ((match = upper.match(/^ALTER TABLE\s+([A-Za-z_][\w$]*)\s+DROP COLUMN IF EXISTS\s+([A-Za-z_][\w$]*)/))) {
+      const table = canonicalIdent(match[1]);
+      const column = canonicalIdent(match[2]);
       actions.push({
         kind: 'drop-column',
-        name: `${match[1]}.${match[2]}`,
-        table: match[1],
-        column: match[2],
+        name: `${table}.${column}`,
+        table,
+        column,
         destructive: true,
         touchesData: true,
         sql: statement,
@@ -186,11 +202,13 @@ export function parseSchemaSql(sql: string): MigrationPlan {
     }
 
     if ((match = upper.match(/^ALTER TABLE\s+([A-Za-z_][\w$]*)\s+ALTER COLUMN\s+([A-Za-z_][\w$]*)\s+(.+)/))) {
+      const table = canonicalIdent(match[1]);
+      const column = canonicalIdent(match[2]);
       actions.push({
         kind: 'alter-column',
-        name: `${match[1]}.${match[2]}`,
-        table: match[1],
-        column: match[2],
+        name: `${table}.${column}`,
+        table,
+        column,
         destructive: false,
         touchesData: false,
         sql: statement,
@@ -199,10 +217,11 @@ export function parseSchemaSql(sql: string): MigrationPlan {
     }
 
     if ((match = upper.match(/^DROP TABLE IF EXISTS\s+([A-Za-z_][\w$]*)/))) {
+      const table = canonicalIdent(match[1]);
       actions.push({
         kind: 'drop-table',
-        name: match[1],
-        table: match[1],
+        name: table,
+        table,
         destructive: true,
         touchesData: true,
         sql: statement,
@@ -211,10 +230,11 @@ export function parseSchemaSql(sql: string): MigrationPlan {
     }
 
     if ((match = upper.match(/^UPDATE\s+([A-Za-z_][\w$]*)/))) {
+      const table = canonicalIdent(match[1]);
       actions.push({
         kind: 'data-update',
-        name: match[1],
-        table: match[1],
+        name: table,
+        table,
         destructive: false,
         touchesData: true,
         sql: statement,
@@ -281,19 +301,23 @@ export async function previewMigration(
   const affectedRecords: AffectedRecords[] = [];
 
   for (const action of plan.actions) {
-    if (action.kind === 'create-table' && action.table) {
-      (await relationExists(db, action.table, 'table'))
+    if (action.kind === 'create-table' && action.name) {
+      (await relationExists(db, action.name, 'table'))
         ? alreadyPresent.push(action.name)
         : wouldCreate.push(action.name);
       continue;
     }
-    if (action.kind === 'create-view' && action.table) {
+    // Views and indexes are named by `name` only — they are never associated
+    // with a `table`, so the existence check must key off `name`. Guarding on
+    // `action.table` here silently skipped every view and index in the plan,
+    // which is exactly what the preview exists to report.
+    if (action.kind === 'create-view' && action.name) {
       (await relationExists(db, action.name, 'view'))
         ? alreadyPresent.push(action.name)
         : wouldCreate.push(action.name);
       continue;
     }
-    if (action.kind === 'create-index' && action.table) {
+    if (action.kind === 'create-index' && action.name) {
       (await relationExists(db, action.name, 'index'))
         ? alreadyPresent.push(action.name)
         : wouldCreate.push(action.name);

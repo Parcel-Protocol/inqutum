@@ -97,6 +97,16 @@ DROP TABLE IF EXISTS users CASCADE;
 -- Converge databases created before optimistic concurrency was added.
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
 
+-- Converge databases created before invoices carried a caller-supplied external
+-- identifier. Bulk imports (#53) key idempotency on this column: a re-run of
+-- the same file must not create a second invoice for the same source record.
+-- NULL for rows created through the API, which generates its own memo, and NULL
+-- rows are excluded from the unique index so an unbounded number of them can
+-- coexist.
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS external_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_external_id
+  ON invoices(external_id) WHERE external_id IS NOT NULL;
+
 -- Converge databases created before expiry became an enforced lifecycle.
 UPDATE invoices
 SET expires_at = COALESCE(created_at, NOW()) + INTERVAL '7 days'

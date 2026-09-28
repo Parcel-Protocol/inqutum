@@ -168,43 +168,46 @@ export function generateInvoicePDF(invoice: Invoice): string {
 
   return `
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="${PRINT_DOCUMENT_CSP}">
-  <title>Invoice ${escapeHtml(rawId)}</title>
+  <title>Payment Proof - Invoice #${escapeHtml(invoice.id)}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { 
       font-family: Arial, sans-serif; 
       padding: 20px; 
-      color: #333; 
+      color: #1f2937; 
       background: white; 
       font-size: 14px;
       line-height: 1.4;
+    }
+    @media print {
+      .no-print { display: none !important; }
     }
     .header { 
       display: flex; 
       justify-content: space-between; 
       margin-bottom: 30px; 
       padding-bottom: 15px; 
-      border-bottom: 2px solid #06b6d4; 
+      border-bottom: 2px solid #0f766e; 
     }
     .logo { 
       font-size: 24px; 
       font-weight: bold; 
-      color: #06b6d4; 
+      color: #0f766e; 
     }
     .invoice-title { 
       text-align: right; 
     }
     .invoice-title h1 { 
       font-size: 28px; 
-      color: #333; 
+      color: #111827; 
       margin-bottom: 5px; 
     }
     .invoice-number { 
-      color: #666; 
+      color: #4b5563; 
       font-size: 12px; 
     }
     .status-badge { 
@@ -216,9 +219,9 @@ export function generateInvoicePDF(invoice: Invoice): string {
       text-transform: uppercase; 
       margin-top: 8px; 
     }
-    .status-paid { background: #d1fae5; color: #065f46; }
-    .status-pending { background: #fef3c7; color: #92400e; }
-    .status-expired { background: #fee2e2; color: #991b1b; }
+    .status-paid { background: #d1fae5; color: #065f46; border: 2px solid #059669; }
+    .status-pending { background: #fef3c7; color: #92400e; border: 2px solid #d97706; }
+    .status-expired { background: #fee2e2; color: #991b1b; #991b1b; border: 2px solid #dc2626;}
     .info-grid { 
       display: flex; 
       gap: 20px; 
@@ -230,9 +233,9 @@ export function generateInvoicePDF(invoice: Invoice): string {
       background: #f9fafb; 
       border-radius: 6px; 
     }
-    .info-section h3 { 
+    .info-section h2 { 
       font-size: 12px; 
-      color: #666; 
+      color: #4b5563; 
       text-transform: uppercase; 
       margin-bottom: 10px; 
       letter-spacing: 0.5px; 
@@ -241,17 +244,17 @@ export function generateInvoicePDF(invoice: Invoice): string {
       margin-bottom: 8px; 
     }
     .info-label { 
-      font-size: 10px; 
-      color: #666; 
+      font-size: 11px; 
+      color: #4b5563; 
       margin-bottom: 2px; 
     }
     .info-value { 
       font-size: 12px; 
-      color: #333; 
+      color: #111827; 
       font-weight: 500; 
     }
     .amount-section { 
-      background: #06b6d4; 
+      background: #0e7490; 
       padding: 20px; 
       border-radius: 8px; 
       text-align: center; 
@@ -276,20 +279,23 @@ export function generateInvoicePDF(invoice: Invoice): string {
     .details-table { 
       width: 100%; 
       margin-bottom: 20px; 
+      border-collapse: collapse;
     }
     .details-table tr { 
       border-bottom: 1px solid #e5e7eb; 
     }
-    .details-table td { 
+    .details-table th, .details-table td { 
       padding: 8px 0; 
+      text-align: left;
     }
-    .details-table td:first-child { 
-      color: #666; 
+    .details-table th { 
+      color: #4b5563; 
       font-size: 11px; 
+      font-weight: 600;
       width: 30%; 
     }
-    .details-table td:last-child { 
-      color: #333; 
+    .details-table td { 
+      color: #111827; 
       font-size: 12px; 
       font-weight: 500; 
     }
@@ -298,8 +304,8 @@ export function generateInvoicePDF(invoice: Invoice): string {
       padding-top: 15px; 
       border-top: 1px solid #e5e7eb; 
       text-align: center; 
-      color: #666; 
-      font-size: 10px; 
+      color: #4b5563; 
+      font-size: 11px; 
     }
     .blockchain-info { 
       background: #fef3c7; 
@@ -309,7 +315,7 @@ export function generateInvoicePDF(invoice: Invoice): string {
       border-left: 3px solid #f59e0b; 
     }
     .blockchain-info p { 
-      font-size: 10px; 
+      font-size: 11px; 
       color: #92400e; 
       line-height: 1.4; 
     }
@@ -320,21 +326,21 @@ export function generateInvoicePDF(invoice: Invoice): string {
     <div class="logo">Quittance</div>
     <div class="invoice-title">
       <h1>INVOICE</h1>
-      <div class="invoice-number">#${escapeHtml(displayId)}</div>
-      <span class="status-badge status-${escapeHtml(safeStatus)}">${escapeHtml(invoice.status || '')}</span>
+      <div class="invoice-number">#${escapeHtml(invoice.id.substring(0, 8).toUpperCase())}</div>
+      <span class="status-badge status-${escapeHtml(invoice.status.toLowerCase())}" araia-label="Invoice Status: ${escapeHtml(invoice.status)}"> Status: ${escapeHtml(invoice.status)}</span>
     </div>
   </div>
 
   <div class="info-grid">
     <div class="info-section">
-      <h3>Bill To</h3>
+      <h2>Bill To</h2>
       ${invoice.customerName ? `<div class="info-row"><div class="info-label">Customer Name</div><div class="info-value">${escapeHtml(invoice.customerName)}</div></div>` : ''}
       ${invoice.customerEmail ? `<div class="info-row"><div class="info-label">Email</div><div class="info-value">${escapeHtml(invoice.customerEmail)}</div></div>` : ''}
       ${!invoice.customerName && !invoice.customerEmail ? `<div class="info-value">N/A</div>` : ''}
     </div>
 
     <div class="info-section">
-      <h3>Invoice Details</h3>
+      <h2>Invoice Details</h2>
       <div class="info-row">
         <div class="info-label">Issue Date</div>
         <div class="info-value">${escapeHtml(createdDateStr)}</div>
@@ -349,14 +355,14 @@ export function generateInvoicePDF(invoice: Invoice): string {
 
   ${invoice.sellerName || invoice.sellerEmail ? `
   <div class="info-section" style="margin-bottom: 20px;">
-    <h3>Seller Information</h3>
+    <h2>Seller Information</h2>
     ${invoice.sellerName ? `<div class="info-row"><div class="info-label">Name</div><div class="info-value">${escapeHtml(invoice.sellerName)}</div></div>` : ''}
     ${invoice.sellerEmail ? `<div class="info-row"><div class="info-label">Email</div><div class="info-value">${escapeHtml(invoice.sellerEmail)}</div></div>` : ''}
   </div>` : ''}
 
   ${isPaid && (invoice.payerName || invoice.payerEmail) ? `
   <div class="info-section" style="margin-bottom: 20px;">
-    <h3>Payer Information</h3>
+    <h2>Payer Information</h2>
     ${invoice.payerName ? `<div class="info-row"><div class="info-label">Name</div><div class="info-value">${escapeHtml(invoice.payerName)}</div></div>` : ''}
     ${invoice.payerEmail ? `<div class="info-row"><div class="info-label">Email</div><div class="info-value">${escapeHtml(invoice.payerEmail)}</div></div>` : ''}
   </div>` : ''}
@@ -367,29 +373,21 @@ export function generateInvoicePDF(invoice: Invoice): string {
     <div class="amount-asset">${escapeHtml(invoice.assetCode || '')}</div>
   </div>
 
-  ${invoice.description ? `
-  <div class="info-section" style="margin-bottom: 20px;">
-    <h3>Description</h3>
-    <p style="color: #1f2937; line-height: 1.6;">${escapeHtml(invoice.description)}</p>
-  </div>` : ''}
+  ${invoice.description ? `<div class="info-section" style="margin-bottom: 20px;"><h2>Description</h2><p style="color: #1f2937; line-height: 1.6;">${escapeHtml(invoice.description)}</p></div>` : ''}
 
   <table class="details-table">
-    <tr><td>Invoice ID</td><td style="font-family: monospace; font-size: 12px;">${escapeHtml(invoice.id || '')}</td></tr>
-    <tr><td>Memo</td><td style="font-family: monospace;">${escapeHtml(invoice.memo || '')}</td></tr>
-    <tr><td>Seller Address</td><td style="font-family: monospace; font-size: 11px; word-break: break-all;">${escapeHtml(invoice.sellerPublicKey || '')}</td></tr>
+    <tr><th scope="row">Invoice ID</th><td style="font-family: monospace; font-size: 12px;">${escapeHtml(invoice.id)}</td></tr>
+    <tr><th scope="row">Memo</th><td style="font-family: monospace;">${escapeHtml(invoice.memo)}</td></tr>
+    <tr><th scope="row">Seller Address</th><td style="font-family: monospace; font-size: 11px; word-break: break-all;">${escapeHtml(invoice.sellerPublicKey)}</td></tr>
     ${isPaid && invoice.paymentTxHash ? `
-    <tr><td>Transaction Hash</td><td style="font-family: monospace; font-size: 11px; word-break: break-all;">${escapeHtml(invoice.paymentTxHash)}</td></tr>
-    <tr><td>Payer Address</td><td style="font-family: monospace; font-size: 11px; word-break: break-all;">${escapeHtml(invoice.payerPublicKey || 'N/A')}</td></tr>
-    ${invoice.payerName ? `<tr><td>Payer Name</td><td>${escapeHtml(invoice.payerName)}</td></tr>` : ''}
-    ${invoice.payerEmail ? `<tr><td>Payer Email</td><td>${escapeHtml(invoice.payerEmail)}</td></tr>` : ''}` : ''}
-    <tr><td>Network</td><td>${network}</td></tr>
+    <tr><th scope="row">Transaction Hash</th><td style="font-family: monospace; font-size: 11px; word-break: break-all;">${escapeHtml(invoice.paymentTxHash)}</td></tr>
+    <tr><th scope="row">Payer Address</th><td style="font-family: monospace; font-size: 11px; word-break: break-all;">${escapeHtml(invoice.payerPublicKey || 'N/A')}</td></tr>
+    ${invoice.payerName ? `<tr><th scope="row">Payer Name</th><td>${escapeHtml(invoice.payerName)}</td></tr>` : ''}
+    ${invoice.payerEmail ? `<tr><th scope="row">Payer Email</th><td>${escapeHtml(invoice.payerEmail)}</td></tr>` : ''}` : ''}
+    <tr><th scope="row">Network</th><td>${network}</td></tr>
   </table>
 
-  ${isPaid ? `
-  <div class="blockchain-info">
-    <p><strong>Payment Verified</strong></p>
-    <p>This payment has been verified and recorded on the Stellar blockchain.</p>
-  </div>` : ''}
+  ${isPaid ? `<div class="blockchain-info" role="region" aria-label="Payment Verification Status"><p><strong> [STATUS: PAID] Payment Verified</strong></p><p>This payment has been verified and recorded on the Stellar blockchain.</p></div>` : ''}
 
   <div class="footer">
     <p><strong>Quittance</strong> - Stellar Payment Platform</p>
@@ -397,15 +395,15 @@ export function generateInvoicePDF(invoice: Invoice): string {
     <p style="margin-top: 10px;">This is an automatically generated invoice.</p>
   </div>
 
-  <div style="position: fixed; top: 10px; right: 10px; background: #06b6d4; color: white; padding: 15px; border-radius: 8px; z-index: 1000; max-width: 300px; font-family: Arial, sans-serif;">
-    <h3 style="margin: 0 0 10px 0; font-size: 14px;">PDF olarak kaydetmek için:</h3>
+  <div class="no-print" style="position: fixed; top: 10px; right: 10px; background: #0f766e; color: white; padding: 15px; border-radius: 8px; z-index: 1000; max-width: 300px; font-family: Arial, sans-serif;">
+    <h3 style="margin: 0 0 10px 0; font-size: 14px;">To Save as PDF or Print:</h3>
     <ol style="margin: 0; padding-left: 20px; font-size: 12px;">
-      <li>Ctrl+P (Windows) veya Cmd+P (Mac)</li>
-      <li>"Hedef" → "PDF olarak kaydet"</li>
-      <li>"Yazdır" butonuna bas</li>
+      <li>Press Ctrl+P (Windows) or Cmd+P (Mac)</li>
+      <li>Select "Destination" &rarr; "Save as PDF"</li>
+      <li>Click "Save" or "Print"</li>
     </ol>
-    <button onclick="window.print()" style="background: white; color: #06b6d4; border: none; padding: 8px 16px; border-radius: 4px; margin-top: 10px; cursor: pointer; font-weight: bold; font-size: 12px;">
-      PDF Olarak Kaydet
+    <button type="button" onclick="window.print()" style="background: white; color: #0f766e; border: none; padding: 8px 16px; border-radius: 4px; margin-top: 10px; cursor: pointer; font-weight: bold; font-size: 12px;">
+      Save as PDF / Print
     </button>
   </div>
 
@@ -413,28 +411,43 @@ export function generateInvoicePDF(invoice: Invoice): string {
 </html>`;
 }
 
-/**
- * Opens invoice PDF in a new printable window.
- * Returns boolean indicating whether the window was opened successfully.
- */
-export function openInvoicePDF(invoice: Invoice): boolean {
-  if (typeof window === 'undefined') {
-    return false;
-  }
+export function openInvoicePDF(invoice: Invoice) {
+  
+  const triggerElement = document.activeElement as HTMLElement | null;
 
-  const pdfContent = generateInvoicePDF(invoice);
+  const toastId = toast.loading('Preparing payment proof for printing...');
 
-  const printWindow = window.open('', '_blank', 'width=800,height=600');
-  if (printWindow) {
+  try {
+    const pdfContent = generateInvoicePDF(invoice);
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+
+    if (!printWindow) {
+      toast.error('Pop-up blocked. Please allow pop-ups to print payment proof.', { id: toastId });
+      triggerElement?.focus();
+      return;
+    }
+
     printWindow.document.write(pdfContent);
     printWindow.document.close();
 
     printWindow.onload = () => {
+      toast.success('Payment proof ready. Opening print dialog...', { id: toastId });
+
       setTimeout(() => {
         printWindow.print();
+
+        printWindow.onafterprint = () => {
+          triggerElement?.focus();
+        };
+
+        setTimeout(() => {
+          triggerElement?.focus();
+        }, 1000);
       }, 500);
     };
-    return true;
+  } catch (err) {
+    toast.error('Failed to generate payment proof PDF.', { id: toastId });
+    triggerElement?.focus();
   }
 
   return false;

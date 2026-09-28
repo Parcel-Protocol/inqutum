@@ -19,6 +19,7 @@ import { correlationMiddleware } from './observability/telemetry';
 import { buildUserSafeErrorResponse, classifyError } from './errors/error-taxonomy';
 
 import { validateEnvironment } from './config/env-validator';
+import { VERIFICATION_CONTRACT_VERSION } from './services/payment-verification';
 
 // Load environment variables
 dotenv.config();

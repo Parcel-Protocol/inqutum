@@ -77,6 +77,9 @@ export default function PaymentButton({
       }
       if (!freighterInstalled) {
         showFreighterInstallPrompt();
+        toast.info('Non-Freighter wallet? Use the QR code or manual payment details below.', {
+          duration: 8000,
+        });
         onError?.('Freighter is not installed');
         return;
       }
