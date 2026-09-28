@@ -4,6 +4,10 @@ import { appendChangeHistory, verifyChangeHistory } from '../src/audit/change-hi
 import { acquireOptimisticLock, type OptimisticLockStore } from '../src/concurrency/optimistic-lock.ts';
 import { buildExport, type ExportRepository } from '../src/exports/export-service.ts';
 import { markStepComplete, recoverOperation, startRecovery } from '../src/recovery/recovery-flow.ts';
+import { indexSearchEntry, searchIndexEntries, type SearchIndexStore } from '../src/services/search-index.service.ts';
+import { createAdapter, type AdapterConfig } from '../src/sandbox/adapters.ts';
+import { categorizeError, isRecoverableError, getErrorStatusCode } from '../src/errors/error-taxonomy.ts';
+import { processBatch, summarizePartialFailures } from '../src/domain/partial-failures.ts';
 
 describe('optimistic lock contract', () => {
   it('commits when the observed version matches', async () => {
@@ -114,5 +118,123 @@ describe('deterministic recovery flow', () => {
     const afterEffect = markStepComplete(afterValidate, steps[1]);
     const replay = { ...afterEffect, currentStep: 1 };
     assert.equal(recoverOperation(steps, replay).action, 'FAIL_SAFE');
+  });
+});
+
+describe('search index service contract', () => {
+  it('indexes valid entries successfully', async () => {
+    const store: SearchIndexStore = {
+      async indexEntry() { return true; },
+      async search() { return []; },
+    };
+    const result = await indexSearchEntry(store, {
+      id: 'inv-1',
+      content: 'invoice content',
+      timestamp: new Date(),
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.code, 'INDEX_SUCCESS');
+  });
+
+  it('returns validation and retryable dependency failures', async () => {
+    const invalid = await indexSearchEntry(
+      { async indexEntry() { return false; }, async search() { return []; } },
+      { id: '', content: 'test', timestamp: new Date() }
+    );
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.code, 'INDEX_INVALID_INPUT');
+
+    const degraded = await indexSearchEntry(
+      { async indexEntry() { throw new Error('down'); }, async search() { return []; } },
+      { id: 'inv-1', content: 'test', timestamp: new Date() }
+    );
+    assert.equal(degraded.ok, false);
+    assert.equal(degraded.code, 'INDEX_STORE_UNAVAILABLE');
+    assert.equal(degraded.recoverable, true);
+  });
+});
+
+describe('adapters contract', () => {
+  it('creates adapters with valid config', async () => {
+    const result = await createAdapter({ type: 'http' });
+    assert.equal(result.ok, true);
+    assert.equal(result.code, 'ADAPTER_SUCCESS');
+  });
+
+  it('returns validation and dependency failures', async () => {
+    const invalid = await createAdapter({ type: '' });
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.code, 'ADAPTER_INVALID_CONFIG');
+
+    const unsupported = await createAdapter({ type: 'unknown' });
+    assert.equal(unsupported.ok, false);
+    assert.equal(unsupported.code, 'ADAPTER_NOT_SUPPORTED');
+  });
+});
+
+describe('error taxonomy contract', () => {
+  it('categorizes errors correctly', () => {
+    const validation = categorizeError('VALIDATION_FAILED', 'Invalid input');
+    assert.equal(validation.recoverable, false);
+    assert.equal(validation.statusCode, 400);
+
+    const unavailable = categorizeError('SERVICE_UNAVAILABLE', 'Service down');
+    assert.equal(unavailable.recoverable, true);
+    assert.equal(unavailable.statusCode, 503);
+
+    const unknown = categorizeError('UNKNOWN_CODE', 'Unknown error');
+    assert.equal(unknown.statusCode, 500);
+  });
+
+  it('provides status codes for all error types', () => {
+    assert.ok(getErrorStatusCode('VALIDATION_FAILED') >= 400);
+    assert.ok(getErrorStatusCode('SERVICE_UNAVAILABLE') >= 500);
+  });
+});
+
+describe('partial failures contract', () => {
+  it('handles successful batch operations', async () => {
+    const ops = [
+      { id: 'op-1', operation: 'create' },
+      { id: 'op-2', operation: 'update' },
+    ];
+    const result = await processBatch(ops, async (op) => ({
+      id: op.id,
+      ok: true,
+      code: 'SUCCESS',
+    }));
+    assert.equal(result.code, 'ALL_SUCCESS');
+    assert.equal(result.successful, 2);
+    assert.equal(result.failed, 0);
+  });
+
+  it('distinguishes partial and total failures', async () => {
+    const ops = [
+      { id: 'op-1', operation: 'create' },
+      { id: 'op-2', operation: 'update' },
+    ];
+    const partialResult = await processBatch(ops, async (op) => ({
+      id: op.id,
+      ok: op.id === 'op-1',
+      code: op.id === 'op-1' ? 'SUCCESS' : 'FAILED',
+    }));
+    assert.equal(partialResult.code, 'PARTIAL_FAILURE');
+    assert.equal(partialResult.successful, 1);
+    assert.equal(partialResult.failed, 1);
+
+    const totalFailure = await processBatch(ops, async () => ({
+      id: 'test',
+      ok: false,
+      code: 'ERROR',
+    }));
+    assert.equal(totalFailure.code, 'TOTAL_FAILURE');
+    assert.equal(totalFailure.recoverable, false);
+  });
+
+  it('summarizes partial failures correctly', async () => {
+    const ops = [{ id: 'op-1', operation: 'test' }];
+    const result = await processBatch(ops, async () => ({ id: 'op-1', ok: true, code: 'SUCCESS' }));
+    const summary = summarizePartialFailures(result);
+    assert.ok(summary.includes('succeeded'));
   });
 });
