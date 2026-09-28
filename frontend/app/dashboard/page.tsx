@@ -20,6 +20,7 @@ import {
 } from '@/lib/dashboard-history';
 import ApiErrorState from '@/components/ApiErrorState';
 import { apiErrorMessage } from '@/lib/api';
+import { formatAmount } from '@/lib/utils';
 
 export default function DashboardPage() {
   const { publicKey, connected } = useWalletStore();
@@ -260,7 +261,7 @@ export default function DashboardPage() {
                       {revenueByAsset.map(([assetCode, revenue]) => (
                         <div key={assetCode} className="flex items-center gap-2">
                           <p className="text-2xl font-bold text-gray-900">
-                            {Number(revenue).toFixed(2)}
+                            {formatAmount(revenue)}
                           </p>
                           <AssetLogo code={assetCode} size={20} />
                         </div>

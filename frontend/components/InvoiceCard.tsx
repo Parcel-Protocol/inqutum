@@ -103,6 +103,12 @@ export default function InvoiceCard({ invoice }: InvoiceCardProps) {
             <span>Expired: {formatDate(invoice.expiresAt)}</span>
           </div>
         )}
+        {status === 'PAID' && invoice.paidAt && (
+          <div className="flex items-center gap-2 text-xs text-green-700">
+            <Clock className="w-4 h-4" />
+            <span>Paid: {formatDate(invoice.paidAt)}</span>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-2">

@@ -1,4 +1,6 @@
-import { format } from 'date-fns';
+
+import format from 'date-fns';
+import { formatAmount, formatDate, formatCurrency } from './utils.js';
 import {
   assertPaymentProofAvailable,
   canExportPaymentProof,
@@ -94,19 +96,19 @@ export function generateInvoiceCSV(invoices: Invoice[]): string {
     .filter((inv) => inv && typeof inv === 'object')
     .map((inv) => [
       inv.id || '',
-      safeFormatDate(inv.createdAt, 'yyyy-MM-dd HH:mm:ss', ''),
+      inv.createdAt ? new Date(inv.createdAt).toISOString() : '',
       inv.sellerName || '',
       inv.sellerEmail || '',
       inv.customerName || '',
       inv.customerEmail || '',
       inv.description || '',
-      inv.amount !== null && inv.amount !== undefined ? inv.amount : '',
+      inv.amount !== null && inv.amount !== undefined ? formatAmount(inv.amount) : '',
       inv.assetCode || '',
       inv.status || '',
-      safeFormatDate(inv.paidAt, 'yyyy-MM-dd HH:mm:ss', ''),
+      inv.paidAt ? new Date(inv.paidAt).toISOString() : '',
       inv.payerName || '',
       inv.payerEmail || '',
-      safeFormatDate(inv.expiresAt, 'yyyy-MM-dd HH:mm:ss', ''),
+      inv.expiresAt ? new Date(inv.expiresAt).toISOString() : '',
       inv.memo || '',
       inv.paymentTxHash || '',
     ]);
@@ -161,10 +163,10 @@ export function generateInvoicePDF(invoice: Invoice): string {
   const rawId = invoice.id || '';
   const displayId = rawId.substring(0, 8).toUpperCase();
   const safeStatus = (invoice.status || '').toLowerCase();
-  const createdDateStr = safeFormatDate(invoice.createdAt, 'MMM dd, yyyy', 'N/A');
-  const expiresDateStr = safeFormatDate(invoice.expiresAt, 'MMM dd, yyyy', 'N/A');
-  const paidDateStr = safeFormatDate(invoice.paidAt, 'MMM dd, yyyy HH:mm', 'N/A');
-  const generatedDateStr = safeFormatDate(new Date(), 'PPpp', new Date().toISOString());
+  const createdDateStr = invoice.createdAt ? formatDate(invoice.createdAt) : 'N/A';
+  const expiresDateStr = invoice.expiresAt ? formatDate(invoice.expiresAt) : 'N/A';
+  const paidDateStr = invoice.paidAt ? formatDate(invoice.paidAt) : 'N/A';
+  const generatedDateStr = formatDate(new Date());
 
   return `
 <!DOCTYPE html>
@@ -369,7 +371,7 @@ export function generateInvoicePDF(invoice: Invoice): string {
 
   <div class="amount-section">
     <div class="amount-label">Amount ${isPaid ? 'Paid' : 'Due'}</div>
-    <div class="amount-value">${invoice.amount !== null && invoice.amount !== undefined ? invoice.amount : ''}</div>
+    <div class="amount-value">${invoice.amount !== null && invoice.amount !== undefined ? formatAmount(invoice.amount) : ''}</div>
     <div class="amount-asset">${escapeHtml(invoice.assetCode || '')}</div>
   </div>
 

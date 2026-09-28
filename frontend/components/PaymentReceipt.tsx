@@ -1,6 +1,6 @@
 'use client';
 
-import { formatAmount, formatDate } from '@/lib/utils';
+import { formatAmount, formatCurrency, formatDate } from '@/lib/utils';
 import { Check, Download, ExternalLink, FileText, Mail } from 'lucide-react';
 import AssetLogo from './AssetLogo';
 import { openInvoicePDF, shareInvoiceByEmail } from '@/lib/export';
@@ -40,7 +40,7 @@ Payment Date: ${formatDate(invoice.paidAt || invoice.createdAt)}
 PAYMENT DETAILS
 ───────────────────────────────────────
 
-Amount Paid: ${formatAmount(invoice.amount, 7)} ${invoice.assetCode}
+Amount Paid: ${formatCurrency(invoice.amount, invoice.assetCode)}
 ${invoice.description ? `Description: ${invoice.description}` : ''}
 ${invoice.customerName ? `Customer: ${invoice.customerName}` : ''}
 ${invoice.customerEmail ? `Email: ${invoice.customerEmail}` : ''}
@@ -94,7 +94,7 @@ Stellar Blockchain Payment System
             <AssetLogo code={invoice.assetCode} size={36} showName={false} />
             <div>
               <p className="text-4xl font-bold text-green-700">
-                {formatAmount(invoice.amount, 7)}
+                {formatAmount(invoice.amount)}
               </p>
               <p className="text-lg font-semibold text-green-600 mt-1">
                 {invoice.assetCode}

@@ -203,7 +203,7 @@ export default function InvoiceDetailPage() {
                 <div className="bg-gradient-to-br from-cyan-50 to-blue-50 p-6 rounded-2xl border-2 border-cyan-200/50 shadow-lg">
                   <p className="text-xs text-gray-600 mb-3 font-semibold uppercase tracking-wide">Amount</p>
                   <p className="text-4xl sm:text-5xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
-                    {formatAmount(invoice.amount, 7)} <span className="text-2xl">{invoice.assetCode}</span>
+                    {formatAmount(invoice.amount)} <span className="text-2xl">{invoice.assetCode}</span>
                   </p>
                 </div>
 

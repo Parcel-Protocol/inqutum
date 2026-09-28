@@ -10,12 +10,12 @@ export function cn(...inputs: ClassValue[]) {
 /**
  * Format amount with proper decimals
  */
-export function formatAmount(amount: number | string, decimals: number = 2): string {
+export function formatAmount(amount: number | string, maxDecimals: number = 7): string {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount;
-  if (!Number.isFinite(num)) return (0).toFixed(decimals);
+  if (!Number.isFinite(num)) return "0";
   return num.toLocaleString('en-US', {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: maxDecimals,
   });
 }
 
@@ -45,13 +45,16 @@ export async function copyToClipboard(text: string): Promise<boolean> {
  */
 export function formatDate(date: string | Date): string {
   const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleDateString('en-US', {
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-GB', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  });
+    timeZone: 'UTC',
+    hour12: false,
+  }) + ' UTC';
 }
 
 /**
@@ -110,8 +113,8 @@ export function isValidEmail(email: string): boolean {
 /**
  * Format currency
  */
-export function formatCurrency(amount: number, currency: string = 'XLM'): string {
-  return `${formatAmount(amount, 7)} ${currency}`;
+export function formatCurrency(amount: number | string, currency: string = 'XLM'): string {
+  return `${formatAmount(amount)} ${currency}`;
 }
 
 export default {
