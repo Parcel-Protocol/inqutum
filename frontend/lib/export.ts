@@ -164,7 +164,13 @@ export function generateInvoicePDF(invoice: Invoice): string {
   const createdDateStr = safeFormatDate(invoice.createdAt, 'MMM dd, yyyy', 'N/A');
   const expiresDateStr = safeFormatDate(invoice.expiresAt, 'MMM dd, yyyy', 'N/A');
   const paidDateStr = safeFormatDate(invoice.paidAt, 'MMM dd, yyyy HH:mm', 'N/A');
-  const generatedDateStr = safeFormatDate(new Date(), 'PPpp', new Date().toISOString());
+  const downloadedDateStr = safeFormatDate(new Date(), 'PPpp', new Date().toISOString());
+
+  const origin =
+    typeof window !== 'undefined' && window.location?.origin
+      ? window.location.origin
+      : 'https://quittance.app';
+  const verifyUrl = `${origin}/pay/${encodeURIComponent(rawId)}`;
 
   return `
 <!DOCTYPE html>
@@ -221,7 +227,7 @@ export function generateInvoicePDF(invoice: Invoice): string {
     }
     .status-paid { background: #d1fae5; color: #065f46; border: 2px solid #059669; }
     .status-pending { background: #fef3c7; color: #92400e; border: 2px solid #d97706; }
-    .status-expired { background: #fee2e2; color: #991b1b; #991b1b; border: 2px solid #dc2626;}
+    .status-expired { background: #fee2e2; color: #991b1b; border: 2px solid #dc2626;}
     .info-grid { 
       display: flex; 
       gap: 20px; 
@@ -325,9 +331,9 @@ export function generateInvoicePDF(invoice: Invoice): string {
   <div class="header">
     <div class="logo">Quittance</div>
     <div class="invoice-title">
-      <h1>INVOICE</h1>
+      <h1>INVOICE PROOF</h1>
       <div class="invoice-number">#${escapeHtml(invoice.id.substring(0, 8).toUpperCase())}</div>
-      <span class="status-badge status-${escapeHtml(invoice.status.toLowerCase())}" araia-label="Invoice Status: ${escapeHtml(invoice.status)}"> Status: ${escapeHtml(invoice.status)}</span>
+      <span class="status-badge status-${escapeHtml(invoice.status.toLowerCase())}" aria-label="Invoice Status: ${escapeHtml(invoice.status)}"> Status: ${escapeHtml(invoice.status)}</span>
     </div>
   </div>
 
@@ -349,7 +355,7 @@ export function generateInvoicePDF(invoice: Invoice): string {
         <div class="info-label">Expires</div>
         <div class="info-value">${escapeHtml(expiresDateStr)}</div>
       </div>
-      ${isPaid ? `<div class="info-row"><div class="info-label">Payment Date</div><div class="info-value">${escapeHtml(paidDateStr)}</div></div>` : ''}
+      ${isPaid ? `<div class="info-row"><div class="info-label">Verified Payment Date</div><div class="info-value">${escapeHtml(paidDateStr)}</div></div>` : ''}
     </div>
   </div>
 
@@ -380,19 +386,26 @@ export function generateInvoicePDF(invoice: Invoice): string {
     <tr><th scope="row">Memo</th><td style="font-family: monospace;">${escapeHtml(invoice.memo)}</td></tr>
     <tr><th scope="row">Seller Address</th><td style="font-family: monospace; font-size: 11px; word-break: break-all;">${escapeHtml(invoice.sellerPublicKey)}</td></tr>
     ${isPaid && invoice.paymentTxHash ? `
-    <tr><th scope="row">Transaction Hash</th><td style="font-family: monospace; font-size: 11px; word-break: break-all;">${escapeHtml(invoice.paymentTxHash)}</td></tr>
+    <tr><th scope="row">Verified Transaction Hash</th><td style="font-family: monospace; font-size: 11px; word-break: break-all;">${escapeHtml(invoice.paymentTxHash)}</td></tr>
     <tr><th scope="row">Payer Address</th><td style="font-family: monospace; font-size: 11px; word-break: break-all;">${escapeHtml(invoice.payerPublicKey || 'N/A')}</td></tr>
     ${invoice.payerName ? `<tr><th scope="row">Payer Name</th><td>${escapeHtml(invoice.payerName)}</td></tr>` : ''}
     ${invoice.payerEmail ? `<tr><th scope="row">Payer Email</th><td>${escapeHtml(invoice.payerEmail)}</td></tr>` : ''}` : ''}
     <tr><th scope="row">Network</th><td>${network}</td></tr>
   </table>
 
-  ${isPaid ? `<div class="blockchain-info" role="region" aria-label="Payment Verification Status"><p><strong> [STATUS: PAID] Payment Verified</strong></p><p>This payment has been verified and recorded on the Stellar blockchain.</p></div>` : ''}
+  ${isPaid ? `
+  <div class="blockchain-info" role="region" aria-label="Payment Verification Status">
+    <p><strong> [STATUS: PAID] Verified Settlement Record</strong></p>
+    <p>This payment was verified against the Stellar ledger. Re-verify live status at any time:</p>
+    <p style="margin-top: 4px; font-family: monospace; font-size: 11px; word-break: break-all;">
+      <a href="${escapeHtml(verifyUrl)}" target="_blank" rel="noopener noreferrer" style="color: #0f766e; text-decoration: underline;">${escapeHtml(verifyUrl)}</a>
+    </p>
+  </div>` : ''}
 
   <div class="footer">
     <p><strong>Quittance</strong> - Stellar Payment Platform</p>
-    <p>Generated on ${escapeHtml(generatedDateStr)}</p>
-    <p style="margin-top: 10px;">This is an automatically generated invoice.</p>
+    <p>Verified At: ${escapeHtml(paidDateStr)} | Document Downloaded At: ${escapeHtml(downloadedDateStr)}</p>
+    <p style="margin-top: 10px;">This is an automatically generated payment proof.</p>
   </div>
 
   <div class="no-print" style="position: fixed; top: 10px; right: 10px; background: #0f766e; color: white; padding: 15px; border-radius: 8px; z-index: 1000; max-width: 300px; font-family: Arial, sans-serif;">
