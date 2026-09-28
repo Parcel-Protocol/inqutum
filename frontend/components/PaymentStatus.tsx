@@ -2,6 +2,7 @@
 
 import { CheckCircle, XCircle, Clock, Loader2 } from 'lucide-react';
 import { getExplorerTransactionUrl } from '@/lib/stellar';
+import { Boundary } from './Boundary';
 
 interface PaymentStatusProps {
   status: 'PENDING' | 'PAID' | 'EXPIRED' | 'CANCELLED';
@@ -10,7 +11,7 @@ interface PaymentStatusProps {
   compact?: boolean;
 }
 
-export default function PaymentStatus({ status, txHash, compact = false }: PaymentStatusProps) {
+function PaymentStatus({ status, txHash, compact = false }: PaymentStatusProps) {
   const getStatusIcon = () => {
     switch (status) {
       case 'PAID':
@@ -78,5 +79,13 @@ export default function PaymentStatus({ status, txHash, compact = false }: Payme
         )}
       </div>
     </div>
+  );
+}
+
+export default function BoundaryWrappedPaymentStatus(props: PaymentStatusProps) {
+  return (
+    <Boundary name="PaymentStatus" fallbackMessage="Failed to load payment status">
+      <PaymentStatus {...props} />
+    </Boundary>
   );
 }

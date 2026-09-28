@@ -1,6 +1,7 @@
 'use client';
 
 import { Loader2 } from 'lucide-react';
+import { Boundary } from './Boundary';
 
 interface PayVerifyPanelProps {
   txHash: string;
@@ -9,7 +10,7 @@ interface PayVerifyPanelProps {
   onVerify: () => void;
 }
 
-export default function PayVerifyPanel({ txHash, verifying, onChange, onVerify }: PayVerifyPanelProps) {
+function PayVerifyPanel({ txHash, verifying, onChange, onVerify }: PayVerifyPanelProps) {
   return (
     <section aria-labelledby="verify-title" className="card">
       <h3 id="verify-title" className="text-lg font-semibold text-center mb-4">Already paid? Verify your transaction</h3>
@@ -23,5 +24,13 @@ export default function PayVerifyPanel({ txHash, verifying, onChange, onVerify }
       </div>
       <p className="text-xs text-gray-500 text-center">Manual verification remains available for QR and external-wallet payments.</p>
     </section>
+  );
+}
+
+export default function BoundaryWrappedPayVerifyPanel(props: PayVerifyPanelProps) {
+  return (
+    <Boundary name="PayVerifyPanel" fallbackMessage="Failed to load verification panel">
+      <PayVerifyPanel {...props} />
+    </Boundary>
   );
 }
