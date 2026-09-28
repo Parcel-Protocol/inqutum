@@ -9,6 +9,11 @@ Every record returned by the API includes `_schemaVersion` (currently `"1.0"`).
 Records persisted before versioning was introduced are treated as version `"0"`
 and silently upgraded on read through the compatibility layer.
 
+Schema helpers accept only non-null, non-array records. Invalid runtime values
+are rejected with `INVALID_SCHEMA_RECORD`; only an own `_schemaVersion` field
+is considered when deciding whether a record is legacy. Stamping returns a new
+object and does not mutate the caller's record.
+
 ### Read path
 
 ```

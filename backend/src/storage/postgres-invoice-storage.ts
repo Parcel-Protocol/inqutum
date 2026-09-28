@@ -14,6 +14,11 @@ import { auditStore, AuditEvent, AuditFilter, AuditQueryResult } from '../audit/
  * parity (expires_at > NOW() guard in markAsPaid, seller-scoped list+stats,
  * PENDING-only cancel) is enforced by the SQL WHERE clauses mirroring the
  * branches in memory-storage.ts.
+ *
+ * This adapter deliberately makes one service call per operation and lets
+ * failures propagate unchanged. In particular, it does not retry writes after
+ * an ambiguous database failure; callers must use the established idempotency
+ * and error-handling paths rather than risk applying a state change twice.
  */
 export class PostgresInvoiceStorage implements InvoiceStorage {
   readonly mode = 'postgres';
