@@ -11,10 +11,50 @@ export interface JobHandlerDeps {
   expirePendingInvoices: () => Promise<number>;
 }
 
+function assertPositiveFiniteNumber(value: number, name: string): void {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${name} must be a positive finite number`);
+  }
+}
+
+function assertJobQueue(queue: JobQueue): void {
+  if (!queue || typeof queue.enqueue !== 'function') {
+    throw new Error('job queue must expose enqueue(type, payload, options)');
+  }
+}
+
+function assertJobWorker(worker: JobWorker): void {
+  if (!worker || typeof worker.register !== 'function') {
+    throw new Error('job worker must expose register(type, handler)');
+  }
+}
+
+function assertJobHandlerDeps(deps: JobHandlerDeps): void {
+  if (!deps || typeof deps.expirePendingInvoices !== 'function') {
+    throw new Error('expirePendingInvoices must be a function');
+  }
+}
+
+function assertJobStore(store: JobStore): JobStore {
+  for (const method of ['enqueue', 'claimNext', 'markSucceeded', 'markFailed', 'get', 'list', 'requeueDead', 'counts'] as const) {
+    if (typeof store[method] !== 'function') {
+      throw new Error(`job store is missing ${method}()`);
+    }
+  }
+  return store;
+}
+
 export function registerJobHandlers(worker: JobWorker, deps: JobHandlerDeps): JobWorker {
-  return worker.register(EXPIRE_PENDING_INVOICES_JOB, async () => ({
-    expired: await deps.expirePendingInvoices(),
-  }));
+  assertJobWorker(worker);
+  assertJobHandlerDeps(deps);
+
+  return worker.register(EXPIRE_PENDING_INVOICES_JOB, async () => {
+    const expired = await deps.expirePendingInvoices();
+    if (!Number.isInteger(expired) || expired < 0) {
+      throw new Error('expirePendingInvoices must resolve to a non-negative integer');
+    }
+    return { expired };
+  });
 }
 
 /**
@@ -23,7 +63,15 @@ export function registerJobHandlers(worker: JobWorker, deps: JobHandlerDeps): Jo
  * produce a single job rather than duplicates.
  */
 export function scheduleExpirySweep(queue: JobQueue, now: Date = new Date(), intervalMs = EXPIRY_SWEEP_INTERVAL_MS) {
-  const bucket = Math.floor(now.getTime() / intervalMs);
+  assertJobQueue(queue);
+  assertPositiveFiniteNumber(intervalMs, 'intervalMs');
+
+  const time = now.getTime();
+  if (!Number.isFinite(time)) {
+    throw new Error('now must be a valid Date');
+  }
+
+  const bucket = Math.floor(time / intervalMs);
   return queue.enqueue(EXPIRE_PENDING_INVOICES_JOB, {}, {
     idempotencyKey: `${EXPIRE_PENDING_INVOICES_JOB}:${bucket}`,
     retryPolicy: { maxAttempts: 3, baseDelayMs: 5_000 },
@@ -31,6 +79,9 @@ export function scheduleExpirySweep(queue: JobQueue, now: Date = new Date(), int
 }
 
 export function startExpiryScheduler(queue: JobQueue, intervalMs = EXPIRY_SWEEP_INTERVAL_MS): () => void {
+  assertJobQueue(queue);
+  assertPositiveFiniteNumber(intervalMs, 'intervalMs');
+
   const enqueue = () =>
     scheduleExpirySweep(queue, new Date(), intervalMs).catch((err) =>
       console.error('[jobs] failed to schedule expiry sweep:', err)
@@ -42,5 +93,5 @@ export function startExpiryScheduler(queue: JobQueue, intervalMs = EXPIRY_SWEEP_
 }
 
 export function createJobStore(pool?: ConstructorParameters<typeof PostgresJobStore>[0]): JobStore {
-  return pool ? new PostgresJobStore(pool) : new MemoryJobStore();
+  return assertJobStore(pool ? new PostgresJobStore(pool) : new MemoryJobStore());
 }

@@ -633,4 +633,43 @@ describe('Background job framework (Issue #51)', () => {
       assert.deepEqual(await store.counts(), { queued: 2, running: 0, succeeded: 0, dead: 1 });
     });
   });
+
+  describe('runtime and memory store contracts', () => {
+    it('rejects malformed scheduler inputs before enqueueing', async () => {
+      const h = harness();
+
+      assert.throws(() => scheduleExpirySweep({} as JobQueue), /job queue/);
+      assert.throws(() => scheduleExpirySweep(h.queue, h.now(), 0), /intervalMs/);
+      assert.throws(() => scheduleExpirySweep(h.queue, new Date('not-a-date')), /valid Date/);
+    });
+
+    it('validates handler dependencies and handler results', async () => {
+      const h = harness();
+
+      assert.throws(() => registerJobHandlers({} as JobWorker, { expirePendingInvoices: async () => 1 }), /job worker/);
+      assert.throws(() => registerJobHandlers(h.make(), {} as any), /expirePendingInvoices/);
+
+      const worker = registerJobHandlers(h.make('contract-worker'), { expirePendingInvoices: async () => Number.NaN });
+      const { job } = await scheduleExpirySweep(h.queue, h.now());
+      await worker.runOnce();
+      h.advance(5_000);
+      await worker.runOnce();
+      h.advance(10_000);
+      await worker.runOnce();
+      assert.equal((await h.store.get(job.id))?.status, 'dead');
+    });
+
+    it('rejects malformed memory jobs and invalid store operations', async () => {
+      const h = harness();
+      const { job } = await h.queue.enqueue('demo', { ok: true });
+
+      await assert.rejects(() => h.store.enqueue({ ...job, id: '' }), /id/);
+      await assert.rejects(() => h.store.enqueue({ ...job, status: 'lost' as any }), /status/);
+      await assert.rejects(() => h.store.claimNext('', h.now(), 10), /workerId/);
+      await assert.rejects(() => h.store.claimNext('w', h.now(), 0), /leaseMs/);
+      await assert.rejects(() => h.store.list({ limit: -1 }), /limit/);
+      await assert.rejects(() => h.store.list({ offset: -1 }), /offset/);
+      await assert.rejects(() => h.store.get(''), /id/);
+    });
+  });
 });

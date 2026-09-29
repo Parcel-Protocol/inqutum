@@ -75,6 +75,50 @@ const REJECTION_ADVICE: Partial<Record<VerificationCode, string>> = {
 };
 
 const MAX_PAGE = 100;
+const NOTIFICATION_TYPES: ReadonlySet<NotificationType> = new Set([
+  'invoice.paid',
+  'invoice.expired',
+  'invoice.cancelled',
+  'payment.rejected',
+]);
+const NOTIFICATION_SEVERITIES: ReadonlySet<NotificationSeverity> = new Set([
+  'info',
+  'success',
+  'warning',
+  'critical',
+]);
+
+function requireNonEmptyString(value: unknown, field: string): asserts value is string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`notification ${field} must be a non-empty string`);
+  }
+}
+
+function validateNotification(n: Notification): void {
+  requireNonEmptyString(n.id, 'id');
+  requireNonEmptyString(n.recipient, 'recipient');
+  requireNonEmptyString(n.title, 'title');
+  requireNonEmptyString(n.message, 'message');
+  requireNonEmptyString(n.deepLink, 'deepLink');
+  requireNonEmptyString(n.dedupKey, 'dedupKey');
+  requireNonEmptyString(n.entityId, 'entityId');
+
+  if (!NOTIFICATION_TYPES.has(n.type)) {
+    throw new Error(`unsupported notification type: ${n.type}`);
+  }
+  if (!NOTIFICATION_SEVERITIES.has(n.severity)) {
+    throw new Error(`unsupported notification severity: ${n.severity}`);
+  }
+  if (!n.data || typeof n.data !== 'object' || Array.isArray(n.data)) {
+    throw new Error('notification data must be an object');
+  }
+  if (Number.isNaN(Date.parse(n.createdAt))) {
+    throw new Error('notification createdAt must be an ISO timestamp');
+  }
+  if (n.readAt !== null && Number.isNaN(Date.parse(n.readAt))) {
+    throw new Error('notification readAt must be null or an ISO timestamp');
+  }
+}
 
 export class MemoryNotificationStore {
   private byId = new Map<string, Notification>();
@@ -83,6 +127,8 @@ export class MemoryNotificationStore {
 
   /** Returns the existing notification (created=false) if the dedup key was already used. */
   insert(n: Notification): { notification: Notification; created: boolean } {
+    validateNotification(n);
+
     const existingId = this.byDedup.get(n.dedupKey);
     if (existingId) return { notification: this.byId.get(existingId)!, created: false };
     this.byId.set(n.id, n);
