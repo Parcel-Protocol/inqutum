@@ -7,12 +7,13 @@ import { openInvoicePDF, shareInvoiceByEmail } from '@/lib/export';
 import { toast } from 'sonner';
 import type { PayPageInvoice } from './pay-page.types';
 import { getExplorerTransactionUrl } from '@/lib/stellar';
+import { Boundary } from './Boundary';
 
 interface PaymentReceiptProps {
   invoice: PayPageInvoice;
 }
 
-export default function PaymentReceipt({ invoice }: PaymentReceiptProps) {
+function PaymentReceipt({ invoice }: PaymentReceiptProps) {
   const handleDownloadPDF = () => {
     openInvoicePDF(invoice as any);
     toast.success('Opening payment proof');
@@ -243,5 +244,13 @@ Stellar Blockchain Payment System
         </p>
       </div>
     </div>
+  );
+}
+
+export default function BoundaryWrappedPaymentReceipt(props: PaymentReceiptProps) {
+  return (
+    <Boundary name="PaymentReceipt" fallbackMessage="Failed to load payment receipt">
+      <PaymentReceipt {...props} />
+    </Boundary>
   );
 }
