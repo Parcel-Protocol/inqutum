@@ -107,6 +107,11 @@ ALTER TABLE invoices ADD COLUMN IF NOT EXISTS external_id TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_external_id
   ON invoices(external_id) WHERE external_id IS NOT NULL;
 
+-- Enforce global uniqueness of verified transaction hashes at the database layer (#19).
+-- Excludes NULL payment_tx_hash so multiple unpaid/pending invoices can coexist.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_payment_tx_hash
+  ON invoices(payment_tx_hash) WHERE payment_tx_hash IS NOT NULL;
+
 -- Converge databases created before expiry became an enforced lifecycle.
 UPDATE invoices
 SET expires_at = COALESCE(created_at, NOW()) + INTERVAL '7 days'

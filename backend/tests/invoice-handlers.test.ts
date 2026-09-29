@@ -137,6 +137,10 @@ function createFakePostgres() {
     }
 
     if (sql.startsWith("UPDATE invoices SET status = 'PAID'")) {
+      const txHash = params[1];
+      if (txHash && rows.some(r => r.id !== params[0] && r.payment_tx_hash === txHash)) {
+        throw new Error('duplicate key value violates unique constraint "idx_invoices_payment_tx_hash"');
+      }
       const row = rows.find(
         candidate => candidate.id === params[0] &&
           candidate.status === 'PENDING' &&
@@ -718,6 +722,99 @@ function runSharedBackendSuite(name: string, createBackend: () => BackendUnderTe
         expired_invoices: 0,
         revenue_by_asset: { XLM: 42.5 },
       });
+    });
+
+    it('Issue #16: guarantees collision-free invoice IDs under concurrent creation requests', async () => {
+      const concurrency = 20;
+      const promises = Array.from({ length: concurrency }, () =>
+        call(
+          handlers().createInvoice,
+          createReq({
+            body: {
+              sellerPublicKey: SELLER_A,
+              amount: 10,
+              assetCode: 'XLM',
+            },
+          })
+        )
+      );
+
+      const results = await Promise.all(promises);
+      const createdIds = new Set<string>();
+      const createdMemos = new Set<string>();
+
+      for (const res of results) {
+        assert.equal(res.statusCode, 201);
+        const inv = res.body.data.invoice;
+        assert.ok(inv.id);
+        assert.ok(inv.memo);
+        assert.equal(createdIds.has(inv.id), false, 'Duplicate invoice ID detected under concurrent creation');
+        assert.equal(createdMemos.has(inv.memo), false, 'Duplicate memo detected under concurrent creation');
+        createdIds.add(inv.id);
+        createdMemos.add(inv.memo);
+      }
+
+      assert.equal(createdIds.size, concurrency);
+    });
+
+    it('Issue #19: rejects marking a second invoice paid with an already-used tx hash', async () => {
+      const inv1 = await createInvoice();
+      const inv2 = await createInvoice();
+
+      const txHash = 'f'.repeat(64);
+
+      transaction = {
+        transaction: { memo: inv1.memo },
+        operations: [
+          {
+            type: 'payment',
+            from: PAYER,
+            to: SELLER_A,
+            amount: String(inv1.amount),
+            asset_type: 'native',
+          },
+        ],
+      };
+
+      const res1 = await call(
+        handlers().verifyPayment,
+        createReq({
+          params: { id: inv1.id },
+          body: { txHash, payerPublicKey: PAYER, amount: inv1.amount },
+        })
+      );
+      assert.equal(res1.statusCode, 200);
+
+      // Direct storage layer attempt to reuse the same txHash must be rejected
+      await assert.rejects(
+        async () => {
+          await storage.markAsPaid(inv2.id, txHash, PAYER);
+        },
+        /duplicate/i
+      );
+
+      transaction = {
+        transaction: { memo: inv2.memo },
+        operations: [
+          {
+            type: 'payment',
+            from: PAYER,
+            to: SELLER_A,
+            amount: String(inv2.amount),
+            asset_type: 'native',
+          },
+        ],
+      };
+
+      const res2 = await call(
+        handlers().verifyPayment,
+        createReq({
+          params: { id: inv2.id },
+          body: { txHash, payerPublicKey: PAYER, amount: inv2.amount },
+        })
+      );
+      assert.ok(res2.statusCode >= 400);
+      assert.match(String(res2.body.error), /duplicate/i);
     });
 
     it('hides the simulate endpoint when simulation is disabled', async () => {

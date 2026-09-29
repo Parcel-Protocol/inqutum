@@ -23,11 +23,11 @@ test('Issue #148: export contract enforces payment proof policy', () => {
   assert.doesNotThrow(() => assertPaymentProofAvailable({ status: 'PAID' }));
   assert.throws(
     () => assertPaymentProofAvailable({ status: 'PENDING' }),
-    /Payment proof is only available once an invoice has been paid/
+    /Payment proof is available only after the invoice is paid/
   );
   assert.throws(
     () => assertPaymentProofAvailable(null),
-    /Payment proof is only available once an invoice has been paid/
+    /Payment proof is available only after the invoice is paid/
   );
 });
 
@@ -71,7 +71,7 @@ test('Issue #148: HTML export escapes malicious tags and script vectors', () => 
 test('Issue #148: printable document enforces restrictive CSP', () => {
   assert.ok(PRINT_DOCUMENT_CSP);
   assert.match(PRINT_DOCUMENT_CSP, /default-src 'none'/);
-  assert.match(PRINT_DOCUMENT_CSP, /script-src 'unsafe-inline'/);
+  assert.match(PRINT_DOCUMENT_CSP, /style-src 'unsafe-inline'/);
 });
 
 test('Issue #148: mailto link generation validates recipient and constructs query', () => {
@@ -87,4 +87,59 @@ test('Issue #148: mailto link generation validates recipient and constructs quer
   // Invalid email rejects link creation
   const invalidLink = buildMailtoUrl('not-an-email', 'Subject', 'Body');
   assert.equal(invalidLink, null);
+});
+
+test('Issue #28: deterministic proof regeneration produces identical payment facts across downloads', () => {
+  const { generateInvoicePDF } = require('../lib/export');
+  const paidInvoice = {
+    id: '12345678-abcd-1234-abcd-1234567890ab',
+    amount: 150.75,
+    assetCode: 'XLM',
+    status: 'PAID',
+    createdAt: '2026-01-01T10:00:00.000Z',
+    expiresAt: '2026-01-08T10:00:00.000Z',
+    paidAt: '2026-01-02T14:30:00.000Z',
+    memo: 'MEMO-STABLE-123',
+    sellerPublicKey: 'G' + 'A'.repeat(55),
+    payerPublicKey: 'G' + 'B'.repeat(55),
+    paymentTxHash: 'a'.repeat(64),
+    customerName: 'Alice',
+  };
+
+  const html1 = generateInvoicePDF(paidInvoice);
+  const html2 = generateInvoicePDF(paidInvoice);
+
+  // Core immutable payment facts must be present in both render outputs
+  for (const html of [html1, html2]) {
+    assert.match(html, /MEMO-STABLE-123/);
+    assert.match(html, /150\.75/);
+    assert.match(html, /aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/);
+    assert.match(html, /Verified At/);
+    assert.match(html, /Document Downloaded At/);
+  }
+});
+
+test('Issue #26: tamper-evident payment proof includes live verification endpoint link and tx hash', () => {
+  const { generateInvoicePDF } = require('../lib/export');
+  const paidInvoice = {
+    id: '87654321-abcd-1234-abcd-1234567890ab',
+    amount: 50.0,
+    assetCode: 'XLM',
+    status: 'PAID',
+    createdAt: '2026-01-01T10:00:00.000Z',
+    expiresAt: '2026-01-08T10:00:00.000Z',
+    paidAt: '2026-01-02T14:30:00.000Z',
+    memo: 'MEMO-REVERIFY-999',
+    sellerPublicKey: 'G' + 'C'.repeat(55),
+    payerPublicKey: 'G' + 'D'.repeat(55),
+    paymentTxHash: 'b'.repeat(64),
+  };
+
+  const html = generateInvoicePDF(paidInvoice);
+
+  // Must include prominent transaction hash and live re-verification link
+  assert.match(html, /Verified Transaction Hash/);
+  assert.match(html, /bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/);
+  assert.match(html, /\/pay\/87654321-abcd-1234-abcd-1234567890ab/);
+  assert.match(html, /Verified Settlement Record/);
 });

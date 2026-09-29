@@ -12,8 +12,16 @@ class MemoryStorage {
   private invoicesByMemo: Map<string, string> = new Map(); // memo -> invoice id
 
   createInvoice(data: Partial<Invoice>): Invoice {
+    const id = data.id || uuidv4();
+    if (this.invoices.has(id)) {
+      throw new Error(`Duplicate invoice ID collision: ${id}`);
+    }
+    if (data.memo && this.invoicesByMemo.has(data.memo)) {
+      throw new Error(`Duplicate invoice memo collision: ${data.memo}`);
+    }
+
     const invoice: Invoice = {
-      id: data.id || uuidv4(),
+      id,
       sellerPublicKey: data.sellerPublicKey!,
       sellerName: data.sellerName,
       sellerEmail: data.sellerEmail,
@@ -80,6 +88,12 @@ class MemoryStorage {
     const invoice = this.invoices.get(id);
     if (!invoice || invoice.status !== 'PENDING') return undefined;
     if (new Date(invoice.expiresAt).getTime() <= now.getTime()) return undefined;
+
+    for (const existing of this.invoices.values()) {
+      if (existing.id !== id && existing.paymentTxHash && existing.paymentTxHash === txHash) {
+        throw new Error(`Duplicate payment_tx_hash collision: ${txHash}`);
+      }
+    }
 
     return this.updateInvoice(id, {
       status: 'PAID',
