@@ -2,7 +2,21 @@ import stellarService, { PaymentRecord } from './stellar.service';
 import invoiceService from './invoice.service';
 import { SELLER_PUBLIC_KEY } from '../config/stellar';
 import { pool } from '../config/database';
-import { checkInvoiceIsPayable } from './payment-verification';
+import { checkInvoiceIsPayable, checkTxHash } from './payment-verification';
+
+export function isUsablePaymentRecord(payment: Partial<PaymentRecord> | null | undefined): payment is PaymentRecord {
+  return Boolean(
+    payment &&
+    checkTxHash(payment.txHash).ok &&
+    typeof payment.from === 'string' &&
+    typeof payment.to === 'string' &&
+    typeof payment.assetCode === 'string' &&
+    payment.assetCode.length > 0 &&
+    typeof payment.amount === 'string' &&
+    /^(?:0|[1-9]\d*)(?:\.\d{1,7})?$/.test(payment.amount.trim()) &&
+    Number(payment.amount) > 0
+  );
+}
 
 class PaymentMonitorService {
   private closeHandler: (() => void) | null = null;
@@ -55,6 +69,11 @@ class PaymentMonitorService {
    */
   private async handlePayment(payment: PaymentRecord) {
     try {
+      if (!isUsablePaymentRecord(payment)) {
+        console.warn('⚠️ Invalid payment record, skipping:', (payment as Partial<PaymentRecord>)?.txHash);
+        return;
+      }
+
       console.log('🔍 Processing payment:', payment.txHash);
 
       // Check if payment has a memo
