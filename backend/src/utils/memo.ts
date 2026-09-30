@@ -1,12 +1,14 @@
 import { nanoid } from 'nanoid';
 
+export const STELLAR_MEMO_MAX_BYTES = 28;
+
 /**
  * Generate a unique memo for invoice
  * Format: INV-TIMESTAMP-RANDOM
  */
 export const generateInvoiceMemo = (): string => {
   const timestamp = Date.now().toString(36).toUpperCase();
-  const random = nanoid(8).toUpperCase();
+  const random = nanoid(8).toUpperCase().replace(/[^A-Z0-9]/g, '0');
   return `INV-${timestamp}-${random}`;
 };
 
@@ -14,7 +16,11 @@ export const generateInvoiceMemo = (): string => {
  * Validate memo format
  */
 export const isValidMemo = (memo: string): boolean => {
-  return /^INV-[A-Z0-9]+-[A-Z0-9]+$/.test(memo);
+  return (
+    typeof memo === 'string' &&
+    Buffer.byteLength(memo, 'utf8') <= STELLAR_MEMO_MAX_BYTES &&
+    /^INV-[A-Z0-9]+-[A-Z0-9]+$/.test(memo)
+  );
 };
 
 /**
