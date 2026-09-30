@@ -54,7 +54,7 @@ export function createEmailRouter(options: EmailRouterOptions): Router {
         });
 
         if (!result.success) {
-          if (result.code === 'EMAIL_RATE_LIMIT_EXCEEDED') {
+          if (result.code === 'EMAIL_RATE_LIMIT_EXCEEDED' || result.code === 'QUOTA_EXCEEDED') {
             res.set('Retry-After', String(result.retryAfterSeconds || 3600));
             return res.status(429).json({
               success: false,
@@ -117,7 +117,7 @@ export function createEmailRouter(options: EmailRouterOptions): Router {
         });
 
         if (!result.success) {
-          if (result.code === 'EMAIL_RATE_LIMIT_EXCEEDED') {
+          if (result.code === 'EMAIL_RATE_LIMIT_EXCEEDED' || result.code === 'QUOTA_EXCEEDED') {
             res.set('Retry-After', String(result.retryAfterSeconds || 3600));
             return res.status(429).json({
               success: false,

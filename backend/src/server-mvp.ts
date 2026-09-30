@@ -24,6 +24,8 @@ import { createCutoverExportRouter } from './routes/cutover.routes';
 import { authenticate, requirePermission } from './middleware/access-control';
 import { exportMemorySnapshot } from './services/cutover.service';
 import memoryStorage from './storage/memory-storage';
+import { createQuotaRouter } from './routes/quota.routes';
+import { createAnalyticsRouter } from './routes/analytics.routes';
 import { mkdirSync, writeFileSync } from 'fs';
 
 dotenv.config();
@@ -73,6 +75,8 @@ app.use('/api', createAuthRouter());
 app.use('/api', createReconciliationRouter({ storage: memoryInvoiceStorage }));
 app.use('/api', createInvoiceRouter({ storage: memoryInvoiceStorage }));
 app.use('/api', createEmailRouter({ storage: memoryInvoiceStorage }));
+app.use('/api', createQuotaRouter());
+app.use('/api', createAnalyticsRouter());
 // Bulk import (issue #53). Dry run by default; opt in with dryRun: false.
 app.use('/api', createImportRouter({ storage: memoryInvoiceStorage }));
 app.use('/api', createPaymentMonitorRouter(paymentMonitorService));

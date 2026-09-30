@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { sendFailure, sendSuccess } from '../types/api';
 import type { InvoiceStorage } from '../storage/invoice-storage';
 import { ImportFormatError, ImportService, buildImportCsvTemplate } from '../imports/import-service';
+import { quotaManager } from '../domain/quota-management';
 
 export interface ImportRouterOptions {
   storage: InvoiceStorage;
@@ -61,6 +62,19 @@ export function createImportRouter(options: ImportRouterOptions): Router {
     }
 
     const { format, payload, dryRun, maxRows } = parsed.data;
+    const rows = Array.isArray(payload)
+      ? payload.length
+      : typeof payload === 'string' && format === 'csv'
+        ? Math.max(0, payload.split(/\r?\n/).filter(Boolean).length - 1)
+        : 1;
+    const quota = quotaManager.reserve('import_row', {
+      actor: req.actor?.wallet ?? req.ip ?? 'anonymous',
+      resource: format,
+    }, rows);
+    if (!quota.allowed) {
+      res.set('Retry-After', String(quota.retryAfterSeconds));
+      return sendFailure(res, 429, quota.message, quota.code, { usage: quota.usage });
+    }
 
     try {
       const plan = dryRun

@@ -35,6 +35,8 @@ import { checkInvoiceVerifyLimit } from '../middleware/rate-limit';
 import { cacheVerificationResult } from '../middleware/verify-cache';
 import { verifySellerSignature } from '../utils/signature-verification';
 import { emailAntiSpamService } from '../services/email-anti-spam.service';
+import { canonicalCancelMessage } from '../utils/canonical-serialization';
+import { quotaManager } from '../domain/quota-management';
 
 /** Kept explicit so clients can tune polling without duplicating backend policy. */
 export const PAYMENT_STATUS_POLL_INTERVAL_MS = 3000;
@@ -189,6 +191,14 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         }
         if (validatedData.network && validatedData.network !== STELLAR_NETWORK) {
           return sendFailure(res, 400, 'Client wallet network does not match the server Stellar network');
+        }
+        const quota = quotaManager.reserve('invoice_create', {
+          actor: req.actor?.wallet ?? validatedData.sellerPublicKey,
+          resource: validatedData.sellerPublicKey,
+        });
+        if (!quota.allowed) {
+          res.set('Retry-After', String(quota.retryAfterSeconds));
+          return sendFailure(res, 429, quota.message, quota.code, { usage: quota.usage });
         }
 
         // Demo abuse prevention (Issue #31): Reject disposable email addresses for customer notifications
@@ -428,7 +438,12 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
             return;
           }
 
-          const candidateMessages = [req.params.id, `cancel:${req.params.id}`];
+          const candidateMessages = [
+            canonicalCancelMessage(req.params.id, sellerPublicKey),
+            // Legacy signatures remain valid during the protocol migration.
+            req.params.id,
+            `cancel:${req.params.id}`,
+          ];
           if (req.body?.message && typeof req.body.message === 'string') {
             candidateMessages.push(req.body.message);
           }
@@ -500,6 +515,17 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         const statusCheck = checkInvoiceIsPayable(invoice.status);
         if (!statusCheck.ok && invoice.status !== 'CANCELLED') {
           return sendVerificationFailure(res, 400, statusCheck.code, statusCheck.error);
+        }
+
+        // Reserve immediately before the Horizon call: malformed or terminal
+        // requests consume no external quota, while every remote lookup does.
+        const quota = quotaManager.reserve('horizon_verify', {
+          actor: req.actor?.wallet ?? req.ip ?? 'anonymous',
+          resource: id,
+        });
+        if (!quota.allowed) {
+          res.set('Retry-After', String(quota.retryAfterSeconds));
+          return sendFailure(res, 429, quota.message, quota.code, { usage: quota.usage });
         }
 
         let txDetails;

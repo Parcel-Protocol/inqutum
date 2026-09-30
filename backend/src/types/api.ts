@@ -50,7 +50,10 @@ export type ApiErrorCode =
   | 'EXCEEDED_INVOICE_EMAIL_LIMIT'
   // Bulk import (issue #53)
   | 'INVALID_IMPORT_REQUEST'
-  | 'INVALID_IMPORT_PAYLOAD';
+  | 'INVALID_IMPORT_PAYLOAD'
+  | 'INVALID_EMAIL'
+  | 'QUOTA_EXCEEDED'
+  | 'INVALID_QUOTA_REQUEST';
 
 export interface ApiFailure {
   success: false;

@@ -41,6 +41,10 @@ export const PERMISSIONS = [
   'monitor:read',
   'monitor:sync',
   'stellar:read',
+  'quota:read',
+  'quota:override',
+  'analytics:read',
+  'analytics:clear',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -82,6 +86,10 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'monitor:read',
     'monitor:sync',
     'stellar:read',
+    'quota:read',
+    'quota:override',
+    'analytics:read',
+    'analytics:clear',
   ],
   service: [
     'lifecycle:read',
@@ -97,6 +105,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     'monitor:read',
     'monitor:sync',
     'stellar:read',
+    'quota:read',
+    'analytics:read',
   ],
 };
 
