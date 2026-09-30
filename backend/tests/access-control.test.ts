@@ -83,6 +83,10 @@ describe('role and permission table', () => {
       'monitor:read',
       'monitor:sync',
       'stellar:read',
+      'quota:read',
+      'quota:override',
+      'analytics:read',
+      'analytics:clear',
     ],
     service: [
       'lifecycle:read',
@@ -98,6 +102,8 @@ describe('role and permission table', () => {
       'monitor:read',
       'monitor:sync',
       'stellar:read',
+      'quota:read',
+      'analytics:read',
     ],
   };
 

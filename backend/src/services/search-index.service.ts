@@ -19,10 +19,13 @@ export interface SearchIndexStore {
   search(query: string): Promise<SearchIndexEntry[]>;
 }
 
+import { quotaManager } from '../domain/quota-management';
+
 export async function indexSearchEntry(
   store: SearchIndexStore,
   entry: SearchIndexEntry,
-  maxContentLength: number = 10000
+  maxContentLength: number = 10000,
+  quotaSubject: { actor: string; resource?: string } = { actor: 'search-index', resource: 'default' }
 ): Promise<SearchIndexResult> {
   if (!entry.id || !entry.content) {
     return {
@@ -39,6 +42,15 @@ export async function indexSearchEntry(
       code: 'INDEX_LIMIT_EXCEEDED',
       message: `Content exceeds maximum length of ${maxContentLength} characters.`,
       recoverable: false,
+    };
+  }
+  const quota = quotaManager.reserve('search_index', quotaSubject);
+  if (!quota.allowed) {
+    return {
+      ok: false,
+      code: 'INDEX_LIMIT_EXCEEDED',
+      message: quota.message,
+      recoverable: true,
     };
   }
 

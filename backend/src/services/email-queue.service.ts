@@ -8,6 +8,7 @@ import type {
 import type { EmailDeliveryStorage } from '../storage/email-delivery-storage';
 import { memoryEmailDeliveryStorage } from '../storage/memory-email-delivery-storage';
 import { EmailAntiSpamService, emailAntiSpamService } from './email-anti-spam.service';
+import { quotaManager } from '../domain/quota-management';
 
 export interface EmailRetryConfig {
   initialBackoffMs: number;
@@ -143,6 +144,21 @@ export class EmailQueueService {
         success: false,
         code: 'EXCEEDED_INVOICE_EMAIL_LIMIT',
         error: `Maximum email notification limit reached for this invoice (${this.maxEmailsPerInvoice} per invoice)`,
+      };
+    }
+
+    // Reserve only after validation and the existing per-invoice cap: this is
+    // the point at which the request can actually consume queue capacity.
+    const quota = quotaManager.reserve('email_enqueue', {
+      actor: input.senderWallet,
+      resource: input.invoiceId,
+    });
+    if (!quota.allowed) {
+      return {
+        success: false,
+        code: quota.code,
+        error: quota.message,
+        retryAfterSeconds: quota.retryAfterSeconds,
       };
     }
 

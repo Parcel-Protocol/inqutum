@@ -11,6 +11,8 @@ import { createAuthRouter } from './auth.routes';
 import { createReconciliationRouter } from './reconciliation.routes';
 import { createEmailRouter } from './email.routes';
 import { authenticate, requirePermission } from '../middleware/access-control';
+import { createQuotaRouter } from './quota.routes';
+import { createAnalyticsRouter } from './analytics.routes';
 
 const router = Router();
 
@@ -31,6 +33,8 @@ router.use(createImportRouter({ storage: postgresInvoiceStorage }));
 
 // Email delivery & queue routes
 router.use(createEmailRouter({ storage: postgresInvoiceStorage }));
+router.use(createQuotaRouter());
+router.use(createAnalyticsRouter());
 
 // Wallet sign-in and role introspection
 router.use(createAuthRouter());
