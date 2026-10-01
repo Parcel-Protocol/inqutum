@@ -7,6 +7,7 @@ import {
   EXPORT_SCHEMA_ID,
   EXPORT_SCHEMA_VERSION,
   ExportForbiddenError,
+  ExportConfigurationError,
   ExportService,
   csvCell,
   toExportRecord,
@@ -229,6 +230,17 @@ describe('Data export workflow (Issue #52)', () => {
       const artifact = await new ExportService(storage).create(SELLER_A, { format: 'json' });
       const ttl = new Date(artifact.meta.expiresAt).getTime() - new Date(artifact.meta.generatedAt).getTime();
       assert.equal(ttl, 24 * 60 * 60 * 1000);
+    });
+
+    it('rejects unsafe service limits that would break paging or retention', () => {
+      for (const opts of [
+        { pageSize: 0 },
+        { maxRecords: 0 },
+        { retentionMs: -1 },
+        { maxArtifactsPerRequester: Number.MAX_SAFE_INTEGER + 1 },
+      ]) {
+        assert.throws(() => new ExportService(storage, opts), ExportConfigurationError);
+      }
     });
   });
 

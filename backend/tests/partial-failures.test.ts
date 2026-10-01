@@ -35,6 +35,7 @@ describe('partial failure report', () => {
     assert.equal(f.severity, 'warning');
     assert.equal(f.stale, false);
     assert.equal(f.ageBucket, 'under_1h');
+    assert.equal(f.recoveryAction, 'retry');
     assert.equal(f.links.retry, '/operations/op-1/retry');
     assert.equal(f.links.inspect, '/invoices/inv-1');
     assert.equal(f.links.remediation, 'docs/PARTIAL-FAILURES.md#job');
@@ -57,6 +58,7 @@ describe('partial failure report', () => {
   it('gives non retryable failures no retry link', () => {
     const report = buildPartialFailureReport([op({ retryable: false })], { now: NOW });
     assert.equal(report.unresolved[0].links.retry, null);
+    assert.equal(report.unresolved[0].recoveryAction, 'inspect');
     assert.equal(report.unresolved[0].severity, 'error');
     assert.equal(report.summary.retryable, 0);
   });
@@ -73,6 +75,19 @@ describe('partial failure report', () => {
     assert.deepEqual(report.unresolved.map((f) => f.id), ['open']);
     assert.equal(report.summary.resolved, 1);
     assert.equal(report.summary.ignored, 1);
+  });
+
+  it('marks resolved or ignored operations as requiring no user-visible recovery action', () => {
+    const report = buildPartialFailureReport(
+      [
+        op({ id: 'done', resolvedAt: ago(HOUR) }),
+        op({ id: 'skip', ignoredAt: ago(HOUR), ignoredReason: 'manual remediation completed' }),
+      ],
+      { now: NOW }
+    );
+    assert.equal(report.summary.resolved, 1);
+    assert.equal(report.summary.ignored, 1);
+    assert.equal(report.unresolved.length, 0);
   });
 
   it('ranks payment failures first and groups by operation type', () => {

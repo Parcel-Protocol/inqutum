@@ -87,6 +87,13 @@ export class ExportForbiddenError extends Error {
   }
 }
 
+export class ExportConfigurationError extends Error {
+  constructor(field: keyof Pick<ExportServiceOptions, 'retentionMs' | 'maxRecords' | 'pageSize' | 'maxArtifactsPerRequester'>) {
+    super(`${field} must be a positive safe integer`);
+    this.name = 'ExportConfigurationError';
+  }
+}
+
 const DEFAULTS = {
   retentionMs: 24 * 60 * 60 * 1000,
   maxRecords: 10_000,
@@ -107,6 +114,14 @@ export function csvCell(value: string | number | null): string {
 }
 
 const iso = (d: Date | string | undefined): string | null => (d ? new Date(d).toISOString() : null);
+
+function positiveInt(
+  field: keyof Pick<ExportServiceOptions, 'retentionMs' | 'maxRecords' | 'pageSize' | 'maxArtifactsPerRequester'>,
+  value: number
+): number {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new ExportConfigurationError(field);
+  return value;
+}
 
 export function toExportRecord(invoice: StoredInvoice): ExportRecord {
   return {
@@ -136,10 +151,10 @@ export class ExportService {
 
   constructor(private readonly storage: InvoiceStorage, options: ExportServiceOptions = {}) {
     this.now = options.now ?? (() => new Date());
-    this.retentionMs = options.retentionMs ?? DEFAULTS.retentionMs;
-    this.maxRecords = options.maxRecords ?? DEFAULTS.maxRecords;
-    this.pageSize = options.pageSize ?? DEFAULTS.pageSize;
-    this.maxArtifacts = options.maxArtifactsPerRequester ?? DEFAULTS.maxArtifactsPerRequester;
+    this.retentionMs = positiveInt('retentionMs', options.retentionMs ?? DEFAULTS.retentionMs);
+    this.maxRecords = positiveInt('maxRecords', options.maxRecords ?? DEFAULTS.maxRecords);
+    this.pageSize = positiveInt('pageSize', options.pageSize ?? DEFAULTS.pageSize);
+    this.maxArtifacts = positiveInt('maxArtifactsPerRequester', options.maxArtifactsPerRequester ?? DEFAULTS.maxArtifactsPerRequester);
   }
 
   /**
