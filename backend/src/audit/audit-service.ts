@@ -8,6 +8,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import { createHash } from 'node:crypto';
 import { sanitizeForLogging } from '../observability/telemetry';
 
 export type AuditAction =
@@ -49,6 +50,8 @@ export interface AuditEvent {
   afterState?: Record<string, any> | null;
   metadata?: Record<string, any>;
   correlationId?: string;
+  previousHash?: string | null;
+  hash?: string;
 }
 
 export interface AuditFilter {
@@ -69,6 +72,26 @@ export interface AuditQueryResult {
   offset: number;
 }
 
+export interface AuditChainVerification {
+  valid: boolean;
+  checked: number;
+  failure?: { index: number; eventId: string; reason: 'previous_hash' | 'event_hash' };
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(obj[key])}`)
+    .join(',')}}`;
+}
+
+function hashEvent(event: Omit<AuditEvent, 'hash'>): string {
+  return createHash('sha256').update(stableJson(event)).digest('hex');
+}
+
 /**
  * In-memory bounded audit event repository with O(1) insertion and indexed lookups.
  */
@@ -85,7 +108,8 @@ export class MemoryAuditStore {
   }
 
   recordEvent(input: Omit<AuditEvent, 'id' | 'timestamp'> & { timestamp?: string }): AuditEvent {
-    const event: AuditEvent = {
+    const previousHash = this.events.at(-1)?.hash ?? null;
+    const eventWithoutHash: Omit<AuditEvent, 'hash'> = {
       id: uuidv4(),
       timestamp: input.timestamp || new Date().toISOString(),
       action: input.action,
@@ -104,7 +128,9 @@ export class MemoryAuditStore {
       afterState: input.afterState ? sanitizeForLogging(input.afterState) : null,
       metadata: input.metadata ? sanitizeForLogging(input.metadata) : undefined,
       correlationId: input.correlationId,
+      previousHash,
     };
+    const event: AuditEvent = { ...eventWithoutHash, hash: hashEvent(eventWithoutHash) };
 
     // If buffer capacity exceeded, evict oldest entry from collections and indexes
     if (this.events.length >= this.maxCapacity) {
@@ -197,6 +223,22 @@ export class MemoryAuditStore {
 
   size(): number {
     return this.events.length;
+  }
+
+  verifyChain(): AuditChainVerification {
+    let previousHash: string | null = null;
+    for (let index = 0; index < this.events.length; index++) {
+      const event = this.events[index];
+      if ((event.previousHash ?? null) !== previousHash) {
+        return { valid: false, checked: index + 1, failure: { index, eventId: event.id, reason: 'previous_hash' } };
+      }
+      const { hash, ...eventWithoutHash } = event;
+      if (hash !== hashEvent(eventWithoutHash)) {
+        return { valid: false, checked: index + 1, failure: { index, eventId: event.id, reason: 'event_hash' } };
+      }
+      previousHash = hash ?? null;
+    }
+    return { valid: true, checked: this.events.length };
   }
 }
 

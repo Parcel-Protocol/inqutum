@@ -23,6 +23,21 @@ export class ConflictError extends Error {
   }
 }
 
+export class InvalidVersionError extends Error {
+  readonly code = 'INVALID_VERSION' as const;
+
+  constructor(readonly field: 'expected' | 'actual', readonly value: number) {
+    super(`${field} version must be a non-negative safe integer.`);
+    this.name = 'InvalidVersionError';
+  }
+}
+
+function assertVersion(field: 'expected' | 'actual', value: number): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new InvalidVersionError(field, value);
+  }
+}
+
 /**
  * Compare the expected version with the actual version.
  *
@@ -31,7 +46,9 @@ export class ConflictError extends Error {
  * - If they differ, a ConflictError is thrown.
  */
 export function checkVersion(expected: number | undefined, actual: number): void {
+  assertVersion('actual', actual);
   if (expected === undefined) return;
+  assertVersion('expected', expected);
   if (expected !== actual) {
     throw new ConflictError(actual, expected);
   }

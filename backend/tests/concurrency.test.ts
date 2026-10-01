@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert';
 
-import { ConflictError, checkVersion } from '../src/concurrency/optimistic-lock';
+import { ConflictError, InvalidVersionError, checkVersion } from '../src/concurrency/optimistic-lock';
 import { MemoryStorage } from '../src/storage/memory-storage';
 
 describe('Optimistic Concurrency', () => {
@@ -25,6 +25,21 @@ describe('Optimistic Concurrency', () => {
           return true;
         }
       );
+    });
+
+    it('rejects invalid expected and actual versions with a stable code', () => {
+      for (const call of [
+        () => checkVersion(-1, 1),
+        () => checkVersion(1.5, 1),
+        () => checkVersion(1, -1),
+        () => checkVersion(1, Number.MAX_SAFE_INTEGER + 1),
+      ]) {
+        assert.throws(call, (err: any) => {
+          assert.ok(err instanceof InvalidVersionError);
+          assert.strictEqual(err.code, 'INVALID_VERSION');
+          return true;
+        });
+      }
     });
   });
 

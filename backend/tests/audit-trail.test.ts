@@ -76,6 +76,49 @@ describe('Audit-Grade Event Trail (Issue #46)', () => {
       assert.equal(event.afterState?.status, 'PAID');
     });
 
+    it('chains event hashes and detects tampering or reordered history', () => {
+      const first = store.recordEvent({
+        action: 'INVOICE_CREATED',
+        actor: { type: 'seller', id: 'seller-1' },
+        scope: { entityType: 'invoice', entityId: 'inv-1' },
+        afterState: { status: 'PENDING' },
+      });
+      const second = store.recordEvent({
+        action: 'INVOICE_CANCELLED',
+        actor: { type: 'seller', id: 'seller-1' },
+        scope: { entityType: 'invoice', entityId: 'inv-1' },
+        beforeState: { status: 'PENDING' },
+        afterState: { status: 'CANCELLED' },
+      });
+
+      assert.equal(second.previousHash, first.hash);
+      assert.deepEqual(store.verifyChain(), { valid: true, checked: 2 });
+
+      second.afterState!.status = 'PAID';
+      const broken = store.verifyChain();
+      assert.equal(broken.valid, false);
+      assert.equal(broken.failure?.reason, 'event_hash');
+    });
+
+    it('detects missing or reordered audit history', () => {
+      const first = store.recordEvent({
+        action: 'INVOICE_CREATED',
+        actor: { type: 'seller', id: 'seller-1' },
+        scope: { entityType: 'invoice', entityId: 'inv-1' },
+      });
+      const second = store.recordEvent({
+        action: 'PAYMENT_VERIFIED',
+        actor: { type: 'payer', id: 'payer-1' },
+        scope: { entityType: 'invoice', entityId: 'inv-1' },
+      });
+      assert.equal(second.previousHash, first.hash);
+
+      first.previousHash = 'missing-link';
+      const broken = store.verifyChain();
+      assert.equal(broken.valid, false);
+      assert.equal(broken.failure?.reason, 'previous_hash');
+    });
+
     it('automatically sanitizes secret keys from audit event before/after states and metadata', () => {
       const event = store.recordEvent({
         action: 'MAINTAINER_ACTION',

@@ -47,6 +47,7 @@ export interface PartialFailure {
   retryable: boolean;
   attempts: number;
   lastError: string | null;
+  recoveryAction: 'retry' | 'inspect' | 'none';
   links: {
     inspect: string;
     retry: string | null;
@@ -143,6 +144,7 @@ export function toPartialFailure(op: PartialOperation, options: PartialFailureOp
     retryable: op.retryable,
     attempts: op.attempts,
     lastError: op.lastError ? redactSecrets(op.lastError) : null,
+    recoveryAction: state !== 'open' ? 'none' : op.retryable ? 'retry' : 'inspect',
     links: {
       inspect: op.invoiceId ? `/invoices/${encodeURIComponent(op.invoiceId)}` : `/operations/${encodeURIComponent(op.id)}`,
       retry: op.retryable && state === 'open' ? `/operations/${encodeURIComponent(op.id)}/retry` : null,
