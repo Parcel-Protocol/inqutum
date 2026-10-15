@@ -25,6 +25,8 @@
     "diagnostics": "tsx ../scripts/diagnostics.ts",
     "evidence:pack": "tsx ../scripts/generate-evidence-pack.ts",
     "evidence:check": "tsx ../scripts/generate-evidence-pack.ts --check",
+    "release:gate": "tsx ../scripts/release-readiness-gate.ts",
+    "release:check": "tsx ../scripts/release-readiness-gate.ts --check",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

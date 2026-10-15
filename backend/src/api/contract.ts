@@ -397,6 +397,33 @@ export const API_CONTRACT: ContractEndpoint[] = [
     summary: 'Mark every notification for a recipient read.',
     responses: [200],
   },
+  {
+    method: 'GET',
+    path: '/api/notifications/preferences',
+    group: 'public',
+    surfaces: BOTH,
+    auth: 'none',
+    summary: 'Retrieve durable notification routing preferences for a recipient.',
+    responses: [200, 400],
+  },
+  {
+    method: 'PUT',
+    path: '/api/notifications/preferences',
+    group: 'public',
+    surfaces: BOTH,
+    auth: 'none',
+    summary: 'Update durable notification routing preferences for a recipient.',
+    responses: [200, 400],
+  },
+  {
+    method: 'GET',
+    path: '/api/notifications/routing-audit',
+    group: 'public',
+    surfaces: BOTH,
+    auth: 'none',
+    summary: 'Retrieve routing and override audit trail for a recipient.',
+    responses: [200, 400],
+  },
 
   // ── Exports ─────────────────────────────────────────────────────────────
   {
@@ -567,6 +594,33 @@ export const API_CONTRACT: ContractEndpoint[] = [
     auth: 'admin',
     summary: 'Close a support impersonation session.',
     responses: [200, 401, 403, 404],
+  },
+  {
+    method: 'POST',
+    path: '/api/ops/policy/simulate',
+    group: 'admin',
+    surfaces: PG_ONLY,
+    auth: 'admin',
+    summary: 'Simulate policy changes against current dataset before committing.',
+    responses: [200, 400, 401, 403],
+  },
+  {
+    method: 'GET',
+    path: '/api/ops/stale-projections/detect',
+    group: 'admin',
+    surfaces: PG_ONLY,
+    auth: 'admin',
+    summary: 'Detect projection drift, stale statuses, and orphaned records.',
+    responses: [200, 401, 403],
+  },
+  {
+    method: 'POST',
+    path: '/api/ops/stale-projections/repair',
+    group: 'admin',
+    surfaces: PG_ONLY,
+    auth: 'admin',
+    summary: 'Automate repair recommendations for detected projection drift.',
+    responses: [200, 401, 403],
   },
 
   // ── Webhooks (only mounted when WEBHOOK_SIGNING_SECRET is set) ───────────

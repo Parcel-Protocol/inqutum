@@ -16,12 +16,22 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { StoredInvoice } from '../storage/invoice-storage';
 import type { VerificationCode } from '../services/payment-verification';
+import {
+  evaluateNotificationRouting,
+  MemoryNotificationPreferenceStore,
+  type NotificationPreferenceStore,
+  type RecipientNotificationPreferences,
+  type RoutingAuditRecord,
+} from './notification-preference';
 
 export type NotificationType =
   | 'invoice.paid'
   | 'invoice.expired'
   | 'invoice.cancelled'
-  | 'payment.rejected';
+  | 'payment.rejected'
+  | 'security.alert'
+  | 'invoice.reminder'
+  | 'marketing.digest';
 
 export type NotificationSeverity = 'info' | 'success' | 'warning' | 'critical';
 
@@ -80,6 +90,9 @@ const NOTIFICATION_TYPES: ReadonlySet<NotificationType> = new Set([
   'invoice.expired',
   'invoice.cancelled',
   'payment.rejected',
+  'security.alert',
+  'invoice.reminder',
+  'marketing.digest',
 ]);
 const NOTIFICATION_SEVERITIES: ReadonlySet<NotificationSeverity> = new Set([
   'info',
@@ -158,19 +171,64 @@ export class MemoryNotificationStore {
 export class NotificationService {
   constructor(
     private readonly store = new MemoryNotificationStore(),
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    private readonly preferenceStore: NotificationPreferenceStore = new MemoryNotificationPreferenceStore()
   ) {}
 
   private emit(
     input: Pick<Notification, 'recipient' | 'type' | 'severity' | 'title' | 'message' | 'entityId' | 'data'> & { dedupKey: string }
-  ): { notification: Notification; created: boolean } {
-    return this.store.insert({
+  ): { notification: Notification | null; created: boolean; suppressed?: boolean; routingReason?: string } {
+    const id = uuidv4();
+    const prefs = this.preferenceStore.getPreferences(input.recipient);
+    const evaluation = evaluateNotificationRouting(
+      { id, type: input.type, recipient: input.recipient },
+      prefs
+    );
+
+    // Record auditable routing decision
+    this.preferenceStore.recordAudit({
       id: uuidv4(),
+      notificationId: id,
+      recipient: input.recipient,
+      type: input.type,
+      urgency: evaluation.urgency,
+      decision: evaluation.decision,
+      reason: evaluation.reason,
+      activeChannels: evaluation.activeChannels,
+      evaluatedAt: this.now().toISOString(),
+      metadata: { ...input.data },
+    });
+
+    // If suppressed by user preferences, do not insert into notification feed
+    if (!evaluation.deliver) {
+      return {
+        notification: null,
+        created: false,
+        suppressed: true,
+        routingReason: evaluation.reason,
+      };
+    }
+
+    const notificationData = {
+      ...input.data,
+      ...(evaluation.reason === 'MANDATORY_OVERRIDE' ? { mandatoryOverride: 'true' } : {}),
+    };
+
+    const inserted = this.store.insert({
+      id,
       ...input,
+      data: notificationData,
       deepLink: `/invoice/${encodeURIComponent(input.entityId)}`,
       createdAt: this.now().toISOString(),
       readAt: null,
     });
+
+    return {
+      notification: inserted.notification,
+      created: inserted.created,
+      suppressed: false,
+      routingReason: evaluation.reason,
+    };
   }
 
   /**
@@ -214,6 +272,63 @@ export class NotificationService {
     }).notification;
   }
 
+  /** Optional notification: Payment reminder for an open invoice */
+  notifyInvoiceReminder(invoice: StoredInvoice): Notification | null {
+    const facts = {
+      invoiceId: invoice.id,
+      amount: invoice.amount,
+      assetCode: invoice.assetCode,
+      memo: invoice.memo,
+    };
+    return this.emit({
+      recipient: invoice.sellerPublicKey,
+      entityId: invoice.id,
+      type: 'invoice.reminder',
+      severity: 'info',
+      dedupKey: `${invoice.id}:invoice.reminder:${new Date().toISOString().slice(0, 10)}`,
+      title: 'Invoice payment reminder',
+      message: `Friendly reminder: Invoice ${invoice.memo} for ${invoice.amount} ${invoice.assetCode} is pending payment.`,
+      data: facts,
+    }).notification;
+  }
+
+  /** Mandatory security alert notification */
+  notifySecurityAlert(
+    recipient: string,
+    title: string,
+    message: string,
+    data: Record<string, string | number> = {}
+  ): Notification | null {
+    return this.emit({
+      recipient,
+      entityId: recipient,
+      type: 'security.alert',
+      severity: 'critical',
+      dedupKey: `${recipient}:security.alert:${Date.now()}`,
+      title,
+      message,
+      data,
+    }).notification;
+  }
+
+  getPreferences(recipient: string): RecipientNotificationPreferences {
+    return this.preferenceStore.getPreferences(recipient);
+  }
+
+  savePreferences(
+    recipient: string,
+    patch: {
+      channels?: Partial<RecipientNotificationPreferences['channels']>;
+      categories?: Partial<RecipientNotificationPreferences['categories']>;
+    }
+  ): RecipientNotificationPreferences {
+    return this.preferenceStore.savePreferences(recipient, patch);
+  }
+
+  getRoutingAudit(recipient: string): RoutingAuditRecord[] {
+    return this.preferenceStore.getAuditRecords(recipient);
+  }
+
   list(recipient: string, query: NotificationQuery = {}): NotificationPage {
     const all = this.store.listForRecipient(recipient);
     const filtered = query.unreadOnly ? all.filter((n) => !n.readAt) : all;
@@ -253,6 +368,7 @@ export class NotificationService {
 
   clear(): void {
     this.store.clear();
+    this.preferenceStore.clear();
   }
 }
 

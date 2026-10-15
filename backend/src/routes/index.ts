@@ -15,7 +15,7 @@ import { PostgresJobStore } from '../jobs/postgres-job-store';
 import { pool } from '../config/database';
 import { healthHandler, readinessHandler } from '../health';
 
-const router = Router();
+const router: Router = Router();
 
 // Health check
 router.get('/health', healthHandler(postgresInvoiceStorage.mode));

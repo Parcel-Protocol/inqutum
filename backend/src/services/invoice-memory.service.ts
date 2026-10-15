@@ -110,6 +110,10 @@ export class InvoiceMemoryService {
   async getInvoiceStats(sellerPublicKey: string): Promise<InvoiceStats[]> {
     return [this.storage.getStats(sellerPublicKey)];
   }
+
+  async getAllInvoices(filter?: { status?: string }): Promise<StoredInvoice[]> {
+    return this.storage.getAllInvoices(filter);
+  }
 }
 
 export default new InvoiceMemoryService();

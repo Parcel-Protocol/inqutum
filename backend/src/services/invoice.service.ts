@@ -318,6 +318,18 @@ export class InvoiceService {
     await this.db.query(query, [invoiceId, eventType, JSON.stringify(eventData)]);
   }
 
+  async getAllInvoices(filter?: { status?: string }): Promise<Invoice[]> {
+    let query = 'SELECT * FROM invoices';
+    const params: any[] = [];
+    if (filter?.status) {
+      query += ' WHERE status = $1';
+      params.push(filter.status);
+    }
+    query += ' ORDER BY created_at DESC';
+    const result = await this.db.query(query, params);
+    return result.rows.map((row) => this.mapRowToInvoice(row));
+  }
+
   /**
    * Get invoice statistics
    */

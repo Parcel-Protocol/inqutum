@@ -93,6 +93,8 @@ export interface InvoiceStorage {
    * at or before `cutoff`. Must not apply the lazy expiry transition.
    */
   findOverduePendingInvoices(cutoff: Date, limit: number): Promise<OverduePendingInvoices>;
+  /** Retrieve all stored invoices for operations, diagnostics, and policy simulations */
+  getAllInvoices?(filter?: { status?: string }): Promise<StoredInvoice[]>;
 
   // Audit trail methods
   recordAuditEvent?(event: Omit<AuditEvent, 'id' | 'timestamp'> & { timestamp?: string }): Promise<AuditEvent>;

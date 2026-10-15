@@ -76,6 +76,31 @@ export function createNotificationRouter(options: NotificationRouterOptions = {}
     sendSuccess(res, 200, notification);
   });
 
+  router.get('/notifications/preferences', (req, res) => {
+    const recipient = recipientOf(req, res);
+    if (!recipient) return;
+    const preferences = service.getPreferences(recipient);
+    sendSuccess(res, 200, preferences);
+  });
+
+  router.put('/notifications/preferences', (req, res) => {
+    const recipient = recipientOf(req, res);
+    if (!recipient) return;
+    const patch = {
+      channels: req.body?.channels,
+      categories: req.body?.categories,
+    };
+    const preferences = service.savePreferences(recipient, patch);
+    sendSuccess(res, 200, preferences);
+  });
+
+  router.get('/notifications/routing-audit', (req, res) => {
+    const recipient = recipientOf(req, res);
+    if (!recipient) return;
+    const records = service.getRoutingAudit(recipient);
+    sendSuccess(res, 200, { records, total: records.length });
+  });
+
   return router;
 }
 

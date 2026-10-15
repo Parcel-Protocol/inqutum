@@ -11,6 +11,10 @@ import {
   type ImpersonationPermission,
 } from '../audit/impersonation';
 import { stellarPublicKeySchema } from '../utils/validation';
+import { simulatePolicyChange } from '../domain/policy-simulation';
+import { loadPolicy } from '../domain/policy';
+import { staleProjectionService } from '../ops/stale-projections.service';
+import { defaultSearchIndex } from '../services/search-index.service';
 
 export interface OpsRouterOptions {
   storage: InvoiceStorage;
@@ -47,6 +51,38 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
         recentLogs: () => metrics.getRecentLogs(200),
       });
       res.json({ success: true, data: report, correlationId: req.correlationId });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Policy simulation preview before committing changes (Issue #267)
+  router.post('/ops/policy/simulate', admin, async (req, res, next) => {
+    try {
+      const invoices = options.storage.getAllInvoices ? await options.storage.getAllInvoices() : [];
+      const current = loadPolicy();
+      const simulation = simulatePolicyChange(invoices, req.body?.proposedPolicy || {}, current);
+      res.json({ success: true, data: simulation, correlationId: req.correlationId });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Stale projection detection and repair recommendations (Issue #269)
+  router.get('/ops/stale-projections/detect', admin, async (req, res, next) => {
+    try {
+      const report = await staleProjectionService.detect(options.storage);
+      res.json({ success: true, data: report, correlationId: req.correlationId });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/ops/stale-projections/repair', admin, async (req, res, next) => {
+    try {
+      const mode = req.body?.mode === 'queued' ? 'queued' : 'immediate';
+      const evidence = await staleProjectionService.repair(options.storage, defaultSearchIndex, { mode });
+      res.json({ success: true, data: evidence, correlationId: req.correlationId });
     } catch (err) {
       next(err);
     }

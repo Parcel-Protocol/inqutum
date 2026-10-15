@@ -143,6 +143,9 @@ matching the filter, not the page size.
 | `GET` | `/api/notifications/unread-count` | none | 200 | Unread notification count for a recipient wallet. |
 | `POST` | `/api/notifications/:id/read` | none | 200, 404 | Mark one notification read. |
 | `POST` | `/api/notifications/read-all` | none | 200 | Mark every notification for a recipient read. |
+| `GET` | `/api/notifications/preferences` | none | 200, 400 | Retrieve durable notification routing preferences for a recipient. |
+| `PUT` | `/api/notifications/preferences` | none | 200, 400 | Update durable notification routing preferences for a recipient. |
+| `GET` | `/api/notifications/routing-audit` | none | 200, 400 | Retrieve routing and override audit trail for a recipient. |
 | `POST` | `/api/exports` | none | 201, 400, 403, 500 | Generate an export artifact. Returns an expiring download handle. |
 | `GET` | `/api/exports/:id` | none | 200, 400, 404, 410 | Download an export artifact. 410 once it has expired. |
 | `GET` | `/api/stellar/account` | none | 200 | Account balances from Horizon. |
@@ -166,6 +169,9 @@ matching the filter, not the page size.
 | `GET` | `/api/ops/impersonation` | `admin` | 200, 401, 403 | List active support impersonation sessions. |
 | `POST` | `/api/ops/impersonation` | `admin` | 201, 400, 401, 403 | Open a support impersonation session. Fully audited. |
 | `POST` | `/api/ops/impersonation/end` | `admin` | 200, 401, 403, 404 | Close a support impersonation session. |
+| `POST` | `/api/ops/policy/simulate` | `admin` | 200, 400, 401, 403 | Simulate policy changes against current dataset before committing. |
+| `GET` | `/api/ops/stale-projections/detect` | `admin` | 200, 401, 403 | Detect projection drift, stale statuses, and orphaned records. |
+| `POST` | `/api/ops/stale-projections/repair` | `admin` | 200, 401, 403 | Automate repair recommendations for detected projection drift. |
 | `POST` | `/api/webhooks/incoming` | `hmac` (conditional) | 200, 400, 401, 408, 409 | Signed inbound webhook receiver. Rejects unsigned, stale and replayed events. |
 
 `/api/webhooks/incoming` is mounted only when `WEBHOOK_SIGNING_SECRET` is set.

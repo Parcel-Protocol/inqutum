@@ -69,6 +69,10 @@ export class PostgresInvoiceStorage implements InvoiceStorage {
     return this.service.findOverduePendingInvoices(cutoff, limit);
   }
 
+  async getAllInvoices(filter?: { status?: string }): Promise<StoredInvoice[]> {
+    return this.service.getAllInvoices(filter);
+  }
+
   async recordAuditEvent(event: Omit<AuditEvent, 'id' | 'timestamp'> & { timestamp?: string }): Promise<AuditEvent> {
     return auditStore.recordEvent(event);
   }
