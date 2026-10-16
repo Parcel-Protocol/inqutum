@@ -347,13 +347,13 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         const offset = after ? 0 : toPositiveInt(req.query.offset, 0);
 
         // Fetch one extra row to learn whether another page exists.
-        const rows = await storage.getInvoicesBySeller(
+        const rows = (await storage.getInvoicesBySeller(
           sellerPublicKey as string,
           status,
           limit + 1,
           offset,
           after ?? undefined
-        );
+        )).filter((row) => row.sellerPublicKey === sellerPublicKey);
         const hasMore = rows.length > limit;
         const invoices = rows.slice(0, limit);
         const last = invoices[invoices.length - 1];

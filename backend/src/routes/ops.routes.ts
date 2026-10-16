@@ -17,6 +17,22 @@ import { staleProjectionService } from '../ops/stale-projections.service';
 import { defaultSearchIndex } from '../services/search-index.service';
 import { SyntheticJourneyMonitor } from '../ops/synthetic-journey-monitor';
 import { verifySnapshotRestore } from '../db/snapshot-restore-verification';
+import {
+  DEPENDENCY_MATRIX,
+  runDependencyChecks,
+  validateMatrix,
+  type DependencyId,
+  type DependencyProbe,
+} from '../ops/dependency-degradation';
+import {
+  PartialFailureRetryCoordinator,
+  buildDashboard,
+  inspectJobFailure,
+  parseDashboardFilter,
+} from '../ops/partial-failure-dashboard';
+import { jobsToOperations } from '../domain/partial-failures';
+import { ApprovalError, MaintainerApprovalService, type IntentStatus, type ReceiptOutcome } from '../ops/maintainer-approval';
+import { auditStore } from '../audit/audit-service';
 
 export interface OpsRouterOptions {
   storage: InvoiceStorage;
@@ -25,6 +41,29 @@ export interface OpsRouterOptions {
   adminToken?: string;
   /** Overridable for tests. */
   impersonation?: ImpersonationService;
+  /** Health probes per external dependency. Missing probes report `unknown`. */
+  dependencyProbes?: Partial<Record<DependencyId, DependencyProbe>>;
+  /**
+   * Approval service for high-impact actions. Defaults to one keyed by
+   * MAINTAINER_INTENT_SECRET; when that is unset the intent routes return 403.
+   */
+  approvals?: MaintainerApprovalService | null;
+}
+
+function defaultApprovals(): MaintainerApprovalService | null {
+  const secret = process.env.MAINTAINER_INTENT_SECRET;
+  if (!secret || secret.length < 16) return null;
+  return new MaintainerApprovalService({
+    secret,
+    onReceipt: (r) =>
+      auditStore.recordEvent({
+        action: 'MAINTAINER_ACTION',
+        actor: { type: 'maintainer', id: r.executedBy ?? r.requestedBy },
+        scope: { entityType: 'system', entityId: r.target },
+        reason: `${r.action}: ${r.outcome}`,
+        metadata: { receiptId: r.id, intentId: r.intentId, outcome: r.outcome, approvedBy: r.approvedBy },
+      }),
+  });
 }
 
 const durationOf = (v: unknown): number | undefined => {
@@ -44,6 +83,166 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
   const router = Router();
   const impersonation = options.impersonation ?? impersonationService;
   const admin = requireAdmin(options.adminToken);
+  const approvals = options.approvals === undefined ? defaultApprovals() : options.approvals;
+  const retries = options.jobs ? new PartialFailureRetryCoordinator(options.jobs) : null;
+
+  if (approvals && options.jobs) {
+    const jobs = options.jobs;
+    approvals.registerExecutor('job.requeue_dead', async (intent) => {
+      const job = await jobs.requeueDead(intent.target, new Date());
+      if (!job) throw new Error('Job is not dead-lettered (state changed since intent was declared)');
+      return { jobId: job.id, status: job.status };
+    });
+  }
+  if (approvals) {
+    approvals.registerExecutor('invoice.cancel', async (intent) => {
+      const expected = typeof intent.params.expectedVersion === 'number' ? intent.params.expectedVersion : undefined;
+      const invoice = await options.storage.cancelInvoice(intent.target, expected);
+      return { invoiceId: invoice.id, status: invoice.status, version: invoice.version ?? null };
+    });
+  }
+
+  const fail = (res: any, req: any, status: number, code: string, error: string) =>
+    res.status(status).json({ success: false, code, error, correlationId: req.correlationId });
+
+  // -- External dependency degradation matrix --------------------------------
+
+  router.get('/ops/dependencies/matrix', admin, (req, res) => {
+    res.json({
+      success: true,
+      data: { matrix: DEPENDENCY_MATRIX.map((d) => ({ ...d, failureModes: d.failureModes.map((f) => ({ code: f.code, description: f.description })) })), problems: validateMatrix() },
+      correlationId: req.correlationId,
+    });
+  });
+
+  router.get('/ops/dependencies', admin, async (req, res, next) => {
+    try {
+      const report = await runDependencyChecks(options.dependencyProbes ?? {});
+      res.status(report.overall === 'down' ? 503 : 200).json({ success: report.overall !== 'down', data: report, correlationId: req.correlationId });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // -- Partial-failure dashboard ---------------------------------------------
+
+  router.get('/ops/partial-failures', admin, async (req, res, next) => {
+    try {
+      const { filter, error } = parseDashboardFilter(req.query as Record<string, unknown>);
+      if (error) return fail(res, req, 400, 'INVALID_FILTER', error);
+      const jobs = options.jobs ? (await options.jobs.list({ limit: 1000 })).jobs : [];
+      res.json({ success: true, data: buildDashboard(jobsToOperations(jobs), filter), correlationId: req.correlationId });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/ops/partial-failures/:id', admin, async (req, res, next) => {
+    try {
+      const job = options.jobs ? await options.jobs.get(req.params.id) : null;
+      if (!job) return fail(res, req, 404, 'NOT_FOUND', 'Operation not found');
+      res.json({ success: true, data: inspectJobFailure(job), correlationId: req.correlationId });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/ops/partial-failures/:id/retry', admin, async (req, res, next) => {
+    try {
+      if (!retries) return fail(res, req, 503, 'JOBS_UNAVAILABLE', 'Job store not configured');
+      const key = req.header('idempotency-key') ?? (typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey : undefined);
+      const outcome = await retries.retry(req.params.id, key);
+      if (outcome.status === 'rejected') {
+        const status = outcome.code === 'NOT_FOUND' ? 404 : outcome.code === 'USER_ACTION_REQUIRED' ? 422 : 409;
+        return fail(res, req, status, outcome.code, outcome.message);
+      }
+      if (outcome.status === 'requeued') {
+        auditStore.recordEvent({
+          action: 'MAINTAINER_ACTION',
+          actor: { type: 'maintainer', id: 'ops-admin' },
+          scope: { entityType: 'system', entityId: outcome.job.id },
+          reason: 'Partial failure retried from dashboard',
+          metadata: { jobType: outcome.job.type, idempotencyKey: key ?? null },
+          correlationId: req.correlationId,
+        });
+      }
+      res.json({ success: true, data: { status: outcome.status, job: outcome.job }, correlationId: req.correlationId });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // -- Maintainer action approvals with signed intent receipts ---------------
+
+  const needApprovals = (req: any, res: any, next: any) =>
+    approvals ? next() : fail(res, req, 403, 'APPROVALS_DISABLED', 'Set MAINTAINER_INTENT_SECRET to enable high-impact actions');
+  const approvalError = (req: any, res: any, err: unknown, next: any) =>
+    err instanceof ApprovalError ? fail(res, req, err.httpStatus, err.code, err.message) : next(err);
+
+  router.post('/ops/intents', admin, needApprovals, (req, res, next) => {
+    try {
+      const intent = approvals!.requestIntent({
+        action: String(req.body?.action ?? ''),
+        target: String(req.body?.target ?? ''),
+        reason: String(req.body?.reason ?? ''),
+        requestedBy: String(req.body?.requestedBy ?? ''),
+        params: req.body?.params && typeof req.body.params === 'object' ? req.body.params : {},
+      });
+      res.status(201).json({ success: true, data: intent, correlationId: req.correlationId });
+    } catch (err) {
+      approvalError(req, res, err, next);
+    }
+  });
+
+  router.get('/ops/intents', admin, needApprovals, (req, res) => {
+    const status = typeof req.query.status === 'string' ? (req.query.status as IntentStatus) : undefined;
+    res.json({ success: true, data: approvals!.listIntents({ status }), correlationId: req.correlationId });
+  });
+
+  router.post('/ops/intents/:id/approve', admin, needApprovals, (req, res, next) => {
+    try {
+      res.json({ success: true, data: approvals!.approve(req.params.id, String(req.body?.approverId ?? '')), correlationId: req.correlationId });
+    } catch (err) {
+      approvalError(req, res, err, next);
+    }
+  });
+
+  router.post('/ops/intents/:id/reject', admin, needApprovals, (req, res, next) => {
+    try {
+      res.json({ success: true, data: approvals!.reject(req.params.id, String(req.body?.maintainerId ?? ''), String(req.body?.reason ?? '')), correlationId: req.correlationId });
+    } catch (err) {
+      approvalError(req, res, err, next);
+    }
+  });
+
+  router.post('/ops/intents/:id/execute', admin, needApprovals, async (req, res, next) => {
+    try {
+      const receipt = await approvals!.execute(req.params.id, {
+        executedBy: String(req.body?.executedBy ?? ''),
+        confirmation: String(req.body?.confirmation ?? ''),
+        params: req.body?.params,
+      });
+      res.status(receipt.outcome === 'succeeded' ? 200 : 502).json({ success: receipt.outcome === 'succeeded', data: receipt, correlationId: req.correlationId });
+    } catch (err) {
+      approvalError(req, res, err, next);
+    }
+  });
+
+  router.get('/ops/receipts', admin, needApprovals, (req, res) => {
+    const outcome = typeof req.query.outcome === 'string' ? (req.query.outcome as ReceiptOutcome) : undefined;
+    const target = typeof req.query.target === 'string' ? req.query.target : undefined;
+    res.json({
+      success: true,
+      data: { receipts: approvals!.listReceipts({ outcome, target }), chainBrokenAt: approvals!.verifyReceiptChain() },
+      correlationId: req.correlationId,
+    });
+  });
+
+  router.get('/ops/receipts/:id', admin, needApprovals, (req, res) => {
+    const receipt = approvals!.getReceipt(req.params.id);
+    if (!receipt) return fail(res, req, 404, 'RECEIPT_NOT_FOUND', 'Receipt not found');
+    res.json({ success: true, data: { receipt, signatureValid: approvals!.verifyReceipt(receipt) }, correlationId: req.correlationId });
+  });
 
   router.get('/ops/health', admin, async (req, res, next) => {
     try {

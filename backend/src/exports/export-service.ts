@@ -188,11 +188,20 @@ export class ExportService {
 
     const records: ExportRecord[] = [];
     let truncated = false;
-    for (let offset = 0; !truncated; offset += this.pageSize) {
+    // Keyset paging (createdAt, id): stable when invoices are inserted or
+    // deleted while the export runs, unlike offset paging which shifts rows.
+    let after: { createdAt: Date; id: string } | undefined;
+    const seenIds = new Set<string>();
+    while (!truncated) {
       if (signal?.aborted) throw new ExportCancelledError();
-      const page = await this.storage.getInvoicesBySeller(requester, request.status, this.pageSize, offset);
+      const page = await this.storage.getInvoicesBySeller(requester, request.status, this.pageSize, 0, after);
       if (signal?.aborted) throw new ExportCancelledError();
+      const tail = page[page.length - 1];
+      if (tail) after = { createdAt: new Date(new Date(tail.createdAt).getTime()), id: tail.id };
+      const before = seenIds.size;
       for (const invoice of page) {
+        if (seenIds.has(invoice.id)) continue;
+        seenIds.add(invoice.id);
         // Defence in depth: never emit a row that is not the requester's.
         if (invoice.sellerPublicKey !== requester) continue;
         const created = new Date(invoice.createdAt).getTime();
@@ -204,7 +213,7 @@ export class ExportService {
         }
         records.push(toExportRecord(invoice));
       }
-      if (page.length < this.pageSize) break;
+      if (page.length < this.pageSize || seenIds.size === before) break;
     }
 
     const generatedAt = this.now();
