@@ -84,6 +84,10 @@ error, `code`, `category`, `retryable` and `recoveryAction` come from
 guaranteed to agree with that table. Every failure carries a `correlationId`,
 which is also logged — quote it in a bug report.
 
+Clients that prefer RFC 9457 can send `Accept: application/problem+json`;
+see `docs/ERROR_CODES.md` for the problem-details format and the full code
+registry.
+
 ## Authentication
 
 | Mode | Requirement |

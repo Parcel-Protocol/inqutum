@@ -14,6 +14,7 @@ import { JobQueue, JobWorker } from './jobs/worker';
 import { PostgresJobStore } from './jobs/postgres-job-store';
 import { registerJobHandlers, startExpiryScheduler } from './jobs/runtime';
 import { buildUserSafeErrorResponse, classifyError } from './errors/error-taxonomy';
+import { problemDetailsNegotiation } from './errors/problem-details';
 import { validateEnvironment } from './config/env-validator';
 
 dotenv.config();
@@ -36,6 +37,8 @@ let stopExpiryScheduler: (() => void) | null = null;
 
 // Correlation ID & Latency Tracking
 app.use(correlationMiddleware());
+// Opt-in RFC 9457 errors: Accept: application/problem+json (docs/ERROR_CODES.md).
+app.use(problemDetailsNegotiation());
 
 // Restrictive security headers on every API response
 app.use(securityHeaders());

@@ -17,6 +17,7 @@ import { healthHandler, readinessHandler } from './health';
 import { securityHeaders } from './security/content-safety';
 import { correlationMiddleware } from './observability/telemetry';
 import { buildUserSafeErrorResponse, classifyError } from './errors/error-taxonomy';
+import { problemDetailsNegotiation } from './errors/problem-details';
 
 import { validateEnvironment } from './config/env-validator';
 import { VERIFICATION_CONTRACT_VERSION } from './services/payment-verification';
@@ -35,6 +36,8 @@ const PORT = envCheck.validated.PORT || process.env.PORT || 3001;
 
 // Correlation ID & Latency Tracking
 app.use(correlationMiddleware());
+// Opt-in RFC 9457 errors: Accept: application/problem+json (docs/ERROR_CODES.md).
+app.use(problemDetailsNegotiation());
 
 // Restrictive security headers on every API response
 app.use(securityHeaders());

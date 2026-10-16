@@ -1,0 +1,353 @@
+{
+  "version": 1,
+  "codes": {
+    "AMOUNT_MISMATCH": {
+      "type": "urn:inqutum:problem:amount-mismatch",
+      "status": 400,
+      "category": "SETTLEMENT",
+      "retryable": false
+    },
+    "ASSET_MISMATCH": {
+      "type": "urn:inqutum:problem:asset-mismatch",
+      "status": 400,
+      "category": "SETTLEMENT",
+      "retryable": false
+    },
+    "CONFLICT": {
+      "type": "urn:inqutum:problem:conflict",
+      "status": 409,
+      "category": "LIFECYCLE",
+      "retryable": true
+    },
+    "CORS_ORIGIN_DENIED": {
+      "type": "urn:inqutum:problem:cors-origin-denied",
+      "status": 403,
+      "category": "AUTHORIZATION",
+      "retryable": false
+    },
+    "DESTINATION_MISMATCH": {
+      "type": "urn:inqutum:problem:destination-mismatch",
+      "status": 400,
+      "category": "SETTLEMENT",
+      "retryable": false
+    },
+    "DUPLICATE_EVENT": {
+      "type": "urn:inqutum:problem:duplicate-event",
+      "status": 409,
+      "category": "LIFECYCLE",
+      "retryable": false
+    },
+    "EMAIL_AUTH_FAILED": {
+      "type": "urn:inqutum:problem:email-auth-failed",
+      "status": 502,
+      "category": "NETWORK",
+      "retryable": false
+    },
+    "EMAIL_DELIVERY_NOT_FOUND": {
+      "type": "urn:inqutum:problem:email-delivery-not-found",
+      "status": 404,
+      "category": "NOT_FOUND",
+      "retryable": false
+    },
+    "EMAIL_FAILED": {
+      "type": "urn:inqutum:problem:email-failed",
+      "status": 502,
+      "category": "NETWORK",
+      "retryable": false
+    },
+    "EMAIL_INVALID_RECIPIENT": {
+      "type": "urn:inqutum:problem:email-invalid-recipient",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "EMAIL_NOT_CONFIGURED": {
+      "type": "urn:inqutum:problem:email-not-configured",
+      "status": 503,
+      "category": "NETWORK",
+      "retryable": false
+    },
+    "EMAIL_QUOTA_EXCEEDED": {
+      "type": "urn:inqutum:problem:email-quota-exceeded",
+      "status": 429,
+      "category": "RATE_LIMIT",
+      "retryable": true
+    },
+    "EMAIL_REQUEST_INVALID": {
+      "type": "urn:inqutum:problem:email-request-invalid",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "EMAIL_TRANSIENT_FAILURE": {
+      "type": "urn:inqutum:problem:email-transient-failure",
+      "status": 503,
+      "category": "NETWORK",
+      "retryable": true
+    },
+    "EMAIL_WEBHOOK_INVALID": {
+      "type": "urn:inqutum:problem:email-webhook-invalid",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "EXPORT_EXPIRED": {
+      "type": "urn:inqutum:problem:export-expired",
+      "status": 410,
+      "category": "LIFECYCLE",
+      "retryable": false
+    },
+    "EXPORT_FAILED": {
+      "type": "urn:inqutum:problem:export-failed",
+      "status": 500,
+      "category": "INTERNAL",
+      "retryable": true
+    },
+    "EXPORT_FORBIDDEN": {
+      "type": "urn:inqutum:problem:export-forbidden",
+      "status": 403,
+      "category": "AUTHORIZATION",
+      "retryable": false
+    },
+    "EXPORT_NOT_FOUND": {
+      "type": "urn:inqutum:problem:export-not-found",
+      "status": 404,
+      "category": "NOT_FOUND",
+      "retryable": false
+    },
+    "HORIZON_UNAVAILABLE": {
+      "type": "urn:inqutum:problem:horizon-unavailable",
+      "status": 503,
+      "category": "NETWORK",
+      "retryable": true
+    },
+    "IMPERSONATION_REJECTED": {
+      "type": "urn:inqutum:problem:impersonation-rejected",
+      "status": 400,
+      "category": "AUTHORIZATION",
+      "retryable": false
+    },
+    "INTERNAL_ERROR": {
+      "type": "urn:inqutum:problem:internal-error",
+      "status": 500,
+      "category": "INTERNAL",
+      "retryable": true
+    },
+    "INVALID_CURSOR": {
+      "type": "urn:inqutum:problem:invalid-cursor",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "INVALID_EXPORT_REQUEST": {
+      "type": "urn:inqutum:problem:invalid-export-request",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "INVALID_PAYER_EMAIL": {
+      "type": "urn:inqutum:problem:invalid-payer-email",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "INVALID_PAYER_NAME": {
+      "type": "urn:inqutum:problem:invalid-payer-name",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "INVALID_SIGNATURE": {
+      "type": "urn:inqutum:problem:invalid-signature",
+      "status": 401,
+      "category": "AUTHORIZATION",
+      "retryable": false
+    },
+    "INVALID_STATUS": {
+      "type": "urn:inqutum:problem:invalid-status",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "INVALID_TX_HASH": {
+      "type": "urn:inqutum:problem:invalid-tx-hash",
+      "status": 400,
+      "category": "SETTLEMENT",
+      "retryable": false
+    },
+    "INVOICE_ALREADY_PAID": {
+      "type": "urn:inqutum:problem:invoice-already-paid",
+      "status": 400,
+      "category": "LIFECYCLE",
+      "retryable": false
+    },
+    "INVOICE_CANNOT_CANCEL": {
+      "type": "urn:inqutum:problem:invoice-cannot-cancel",
+      "status": 400,
+      "category": "LIFECYCLE",
+      "retryable": false
+    },
+    "INVOICE_EXPIRED": {
+      "type": "urn:inqutum:problem:invoice-expired",
+      "status": 400,
+      "category": "LIFECYCLE",
+      "retryable": false
+    },
+    "INVOICE_NOT_FOUND": {
+      "type": "urn:inqutum:problem:invoice-not-found",
+      "status": 404,
+      "category": "NOT_FOUND",
+      "retryable": false
+    },
+    "INVOICE_NOT_PAID": {
+      "type": "urn:inqutum:problem:invoice-not-paid",
+      "status": 400,
+      "category": "LIFECYCLE",
+      "retryable": false
+    },
+    "INVOICE_NOT_PENDING": {
+      "type": "urn:inqutum:problem:invoice-not-pending",
+      "status": 400,
+      "category": "LIFECYCLE",
+      "retryable": false
+    },
+    "JOBS_ADMIN_DISABLED": {
+      "type": "urn:inqutum:problem:jobs-admin-disabled",
+      "status": 403,
+      "category": "AUTHORIZATION",
+      "retryable": false
+    },
+    "JOB_NOT_DEAD": {
+      "type": "urn:inqutum:problem:job-not-dead",
+      "status": 409,
+      "category": "LIFECYCLE",
+      "retryable": false
+    },
+    "JOB_NOT_FOUND": {
+      "type": "urn:inqutum:problem:job-not-found",
+      "status": 404,
+      "category": "NOT_FOUND",
+      "retryable": false
+    },
+    "MALFORMED_WEBHOOK": {
+      "type": "urn:inqutum:problem:malformed-webhook",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "MEMO_MISMATCH": {
+      "type": "urn:inqutum:problem:memo-mismatch",
+      "status": 400,
+      "category": "SETTLEMENT",
+      "retryable": false
+    },
+    "MISSING_TX_HASH": {
+      "type": "urn:inqutum:problem:missing-tx-hash",
+      "status": 400,
+      "category": "SETTLEMENT",
+      "retryable": false
+    },
+    "NETWORK_MISMATCH": {
+      "type": "urn:inqutum:problem:network-mismatch",
+      "status": 400,
+      "category": "SETTLEMENT",
+      "retryable": false
+    },
+    "NOTIFICATION_NOT_FOUND": {
+      "type": "urn:inqutum:problem:notification-not-found",
+      "status": 404,
+      "category": "NOT_FOUND",
+      "retryable": false
+    },
+    "NOT_FOUND": {
+      "type": "urn:inqutum:problem:not-found",
+      "status": 404,
+      "category": "NOT_FOUND",
+      "retryable": false
+    },
+    "NO_PAYMENT_OPERATION": {
+      "type": "urn:inqutum:problem:no-payment-operation",
+      "status": 400,
+      "category": "SETTLEMENT",
+      "retryable": false
+    },
+    "PAYER_INFO_TOO_LONG": {
+      "type": "urn:inqutum:problem:payer-info-too-long",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "RATE_LIMITED": {
+      "type": "urn:inqutum:problem:rate-limited",
+      "status": 429,
+      "category": "RATE_LIMIT",
+      "retryable": true
+    },
+    "RECIPIENT_EMAIL_REQUIRED": {
+      "type": "urn:inqutum:problem:recipient-email-required",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "RECIPIENT_REQUIRED": {
+      "type": "urn:inqutum:problem:recipient-required",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "REQUESTER_REQUIRED": {
+      "type": "urn:inqutum:problem:requester-required",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "SELLER_REQUIRED": {
+      "type": "urn:inqutum:problem:seller-required",
+      "status": 400,
+      "category": "AUTHORIZATION",
+      "retryable": false
+    },
+    "SESSION_NOT_FOUND": {
+      "type": "urn:inqutum:problem:session-not-found",
+      "status": 404,
+      "category": "NOT_FOUND",
+      "retryable": false
+    },
+    "STALE_TIMESTAMP": {
+      "type": "urn:inqutum:problem:stale-timestamp",
+      "status": 408,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "TARGET_INVALID": {
+      "type": "urn:inqutum:problem:target-invalid",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    },
+    "TRANSACTION_NOT_FOUND": {
+      "type": "urn:inqutum:problem:transaction-not-found",
+      "status": 404,
+      "category": "NOT_FOUND",
+      "retryable": true
+    },
+    "UNAUTHORIZED": {
+      "type": "urn:inqutum:problem:unauthorized",
+      "status": 401,
+      "category": "AUTHORIZATION",
+      "retryable": false
+    },
+    "UNAUTHORIZED_SELLER": {
+      "type": "urn:inqutum:problem:unauthorized-seller",
+      "status": 403,
+      "category": "AUTHORIZATION",
+      "retryable": false
+    },
+    "VALIDATION_FAILED": {
+      "type": "urn:inqutum:problem:validation-failed",
+      "status": 400,
+      "category": "VALIDATION",
+      "retryable": false
+    }
+  }
+}

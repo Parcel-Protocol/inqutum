@@ -225,6 +225,281 @@ export const DOMAIN_ERROR_TAXONOMY: Record<string, DomainErrorDefinition> = {
     userSafeMessage: 'Invoice was modified by another session. Please refresh and try again.',
     recoveryAction: 'Refresh the invoice to get the latest version, then retry the operation.',
   },
+  NOT_FOUND: {
+    code: 'NOT_FOUND',
+    category: 'NOT_FOUND',
+    httpStatus: 404,
+    retryable: false,
+    userSafeMessage: 'Endpoint not found',
+    recoveryAction: 'Check the request method and path against docs/API_CONTRACTS.md.',
+  },
+  INVALID_STATUS: {
+    code: 'INVALID_STATUS',
+    category: 'VALIDATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'Unknown status filter',
+    recoveryAction: 'Use one of the status values listed in the error message.',
+  },
+  INVALID_CURSOR: {
+    code: 'INVALID_CURSOR',
+    category: 'VALIDATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'Pagination cursor is not valid',
+    recoveryAction: 'Drop the cursor parameter and restart from the first page.',
+  },
+  INVOICE_NOT_PAID: {
+    code: 'INVOICE_NOT_PAID',
+    category: 'LIFECYCLE',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'This action is only available for PAID invoices',
+    recoveryAction: 'Wait until payment is verified, or use the payment_request template instead.',
+  },
+  RECIPIENT_EMAIL_REQUIRED: {
+    code: 'RECIPIENT_EMAIL_REQUIRED',
+    category: 'VALIDATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'Recipient email address is required',
+    recoveryAction: 'Pass recipientEmail in the request body or set a customer email on the invoice.',
+  },
+
+  // --- Notifications ---
+  RECIPIENT_REQUIRED: {
+    code: 'RECIPIENT_REQUIRED',
+    category: 'VALIDATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'recipient must be a valid Stellar public key',
+    recoveryAction: 'Pass the recipient wallet public key (G…, 56 characters).',
+  },
+  NOTIFICATION_NOT_FOUND: {
+    code: 'NOTIFICATION_NOT_FOUND',
+    category: 'NOT_FOUND',
+    httpStatus: 404,
+    retryable: false,
+    userSafeMessage: 'Notification not found',
+    recoveryAction: 'Refresh the notification list; the item may belong to another recipient.',
+  },
+
+  // --- Exports ---
+  INVALID_EXPORT_REQUEST: {
+    code: 'INVALID_EXPORT_REQUEST',
+    category: 'VALIDATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'Export request is not valid',
+    recoveryAction: 'Fix the fields named in the error message and resubmit the export.',
+  },
+  REQUESTER_REQUIRED: {
+    code: 'REQUESTER_REQUIRED',
+    category: 'VALIDATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'requester must be a valid Stellar public key',
+    recoveryAction: 'Use the downloadPath returned when the export was created; it carries the requester.',
+  },
+  EXPORT_FORBIDDEN: {
+    code: 'EXPORT_FORBIDDEN',
+    category: 'AUTHORIZATION',
+    httpStatus: 403,
+    retryable: false,
+    userSafeMessage: 'You are not allowed to export these records',
+    recoveryAction: 'Export only invoices owned by the connected wallet.',
+  },
+  EXPORT_NOT_FOUND: {
+    code: 'EXPORT_NOT_FOUND',
+    category: 'NOT_FOUND',
+    httpStatus: 404,
+    retryable: false,
+    userSafeMessage: 'Export not found',
+    recoveryAction: 'Generate a new export; export ids are only valid for the requester that created them.',
+  },
+  EXPORT_EXPIRED: {
+    code: 'EXPORT_EXPIRED',
+    category: 'LIFECYCLE',
+    httpStatus: 410,
+    retryable: false,
+    userSafeMessage: 'This export has expired and was deleted',
+    recoveryAction: 'Generate a new export.',
+  },
+  EXPORT_FAILED: {
+    code: 'EXPORT_FAILED',
+    category: 'INTERNAL',
+    httpStatus: 500,
+    retryable: true,
+    userSafeMessage: 'Failed to generate export',
+    recoveryAction: 'Retry the export. If it keeps failing, contact support with the correlation ID.',
+  },
+
+  // --- Email delivery ---
+  EMAIL_REQUEST_INVALID: {
+    code: 'EMAIL_REQUEST_INVALID',
+    category: 'VALIDATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'Invalid email request',
+    recoveryAction: 'Check the request body against the /api/email/send contract.',
+  },
+  EMAIL_INVALID_RECIPIENT: {
+    code: 'EMAIL_INVALID_RECIPIENT',
+    category: 'VALIDATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'Recipient is not a valid email address',
+    recoveryAction: 'Check the recipient address and try again.',
+  },
+  EMAIL_AUTH_FAILED: {
+    code: 'EMAIL_AUTH_FAILED',
+    category: 'NETWORK',
+    httpStatus: 502,
+    retryable: false,
+    userSafeMessage: 'The email provider rejected our credentials',
+    recoveryAction: 'The email provider rejected our credentials. A maintainer must fix the provider API key or SMTP username.',
+  },
+  EMAIL_QUOTA_EXCEEDED: {
+    code: 'EMAIL_QUOTA_EXCEEDED',
+    category: 'RATE_LIMIT',
+    httpStatus: 429,
+    retryable: true,
+    userSafeMessage: 'The email provider is rate limiting this deployment',
+    recoveryAction: 'The email provider is rate limiting or out of quota. Try again later or upgrade the sending plan.',
+  },
+  EMAIL_TRANSIENT_FAILURE: {
+    code: 'EMAIL_TRANSIENT_FAILURE',
+    category: 'NETWORK',
+    httpStatus: 503,
+    retryable: true,
+    userSafeMessage: 'The email provider is temporarily unreachable',
+    recoveryAction: 'The email provider is temporarily unreachable. Try again in a few minutes.',
+  },
+  EMAIL_NOT_CONFIGURED: {
+    code: 'EMAIL_NOT_CONFIGURED',
+    category: 'NETWORK',
+    httpStatus: 503,
+    retryable: false,
+    userSafeMessage: 'Email delivery is not configured',
+    recoveryAction: 'Email delivery is not configured for this deployment. See docs/EMAIL_DELIVERY.md.',
+  },
+  EMAIL_FAILED: {
+    code: 'EMAIL_FAILED',
+    category: 'NETWORK',
+    httpStatus: 502,
+    retryable: false,
+    userSafeMessage: 'Email delivery failed',
+    recoveryAction: 'The email provider rejected this message. Check the address and content, then try again.',
+  },
+  EMAIL_WEBHOOK_INVALID: {
+    code: 'EMAIL_WEBHOOK_INVALID',
+    category: 'VALIDATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'Invalid webhook payload',
+    recoveryAction: 'Provider callbacks must carry messageId and an event of bounce, complaint or delivered.',
+  },
+  EMAIL_DELIVERY_NOT_FOUND: {
+    code: 'EMAIL_DELIVERY_NOT_FOUND',
+    category: 'NOT_FOUND',
+    httpStatus: 404,
+    retryable: false,
+    userSafeMessage: 'No delivery matches that message id',
+    recoveryAction: 'Confirm the provider message id; callbacks for unknown messages are ignored.',
+  },
+
+  // --- Signed webhooks ---
+  MALFORMED_WEBHOOK: {
+    code: 'MALFORMED_WEBHOOK',
+    category: 'VALIDATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'Missing required webhook headers',
+    recoveryAction: 'Send X-Webhook-Signature, X-Webhook-Timestamp and X-Webhook-Event-Id.',
+  },
+  STALE_TIMESTAMP: {
+    code: 'STALE_TIMESTAMP',
+    category: 'VALIDATION',
+    httpStatus: 408,
+    retryable: false,
+    userSafeMessage: 'Webhook timestamp is outside the allowed window',
+    recoveryAction: 'Re-sign the event with a fresh timestamp and check the sender clock.',
+  },
+  INVALID_SIGNATURE: {
+    code: 'INVALID_SIGNATURE',
+    category: 'AUTHORIZATION',
+    httpStatus: 401,
+    retryable: false,
+    userSafeMessage: 'Webhook signature verification failed',
+    recoveryAction: 'Sign the raw request body with the shared WEBHOOK_SIGNING_SECRET.',
+  },
+  DUPLICATE_EVENT: {
+    code: 'DUPLICATE_EVENT',
+    category: 'LIFECYCLE',
+    httpStatus: 409,
+    retryable: false,
+    userSafeMessage: 'Webhook event has already been processed',
+    recoveryAction: 'No action needed; the event was already applied. Do not retry it.',
+  },
+
+  // --- Admin / ops surface ---
+  UNAUTHORIZED: {
+    code: 'UNAUTHORIZED',
+    category: 'AUTHORIZATION',
+    httpStatus: 401,
+    retryable: false,
+    userSafeMessage: 'Invalid or missing admin token',
+    recoveryAction: 'Send Authorization: Bearer <JOBS_ADMIN_TOKEN>.',
+  },
+  JOBS_ADMIN_DISABLED: {
+    code: 'JOBS_ADMIN_DISABLED',
+    category: 'AUTHORIZATION',
+    httpStatus: 403,
+    retryable: false,
+    userSafeMessage: 'Job inspection is not enabled',
+    recoveryAction: 'Set JOBS_ADMIN_TOKEN on the deployment to enable the admin surface.',
+  },
+  JOB_NOT_FOUND: {
+    code: 'JOB_NOT_FOUND',
+    category: 'NOT_FOUND',
+    httpStatus: 404,
+    retryable: false,
+    userSafeMessage: 'Job not found',
+    recoveryAction: 'List jobs first; completed jobs may have been pruned.',
+  },
+  JOB_NOT_DEAD: {
+    code: 'JOB_NOT_DEAD',
+    category: 'LIFECYCLE',
+    httpStatus: 409,
+    retryable: false,
+    userSafeMessage: 'Only dead-lettered jobs can be retried',
+    recoveryAction: 'Wait for the job to finish or dead-letter before retrying it.',
+  },
+  TARGET_INVALID: {
+    code: 'TARGET_INVALID',
+    category: 'VALIDATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'targetId must be a valid Stellar public key',
+    recoveryAction: 'Pass the target wallet public key (G…, 56 characters).',
+  },
+  IMPERSONATION_REJECTED: {
+    code: 'IMPERSONATION_REJECTED',
+    category: 'AUTHORIZATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'Impersonation session rejected',
+    recoveryAction: 'Supply a reason, an allowed permission set and a duration within policy limits.',
+  },
+  SESSION_NOT_FOUND: {
+    code: 'SESSION_NOT_FOUND',
+    category: 'NOT_FOUND',
+    httpStatus: 404,
+    retryable: false,
+    userSafeMessage: 'No active session with that id for this maintainer',
+    recoveryAction: 'The session may have already expired or been ended.',
+  },
+
   INTERNAL_ERROR: {
     code: 'INTERNAL_ERROR',
     category: 'INTERNAL',
@@ -334,6 +609,23 @@ export function classifyError(error: any): DomainErrorDefinition & { customMessa
 }
 
 /**
+ * Categories whose underlying error text describes our infrastructure (hosts,
+ * ports, SQL, provider responses) rather than the caller's request. For these
+ * the raw `error.message` is never echoed; the taxonomy message is used.
+ */
+const OPAQUE_CATEGORIES: ReadonlySet<ErrorCategory> = new Set(['INTERNAL', 'NETWORK']);
+
+/**
+ * Whether a raw error message may be shown to the caller for a classified error.
+ * Explicit AppErrors carry a message chosen by the code that threw them; anything
+ * else in an opaque category falls back to the canonical user-safe message.
+ */
+export function canEchoErrorMessage(error: any, category: ErrorCategory): boolean {
+  if (error instanceof AppError) return true;
+  return !OPAQUE_CATEGORIES.has(category);
+}
+
+/**
  * Build a user-safe API error response payload.
  */
 export function buildUserSafeErrorResponse(
@@ -354,7 +646,12 @@ export function buildUserSafeErrorResponse(
   let userMessage = classified.userSafeMessage;
   if (classified.customMessage) {
     userMessage = classified.customMessage;
-  } else if (classified.code !== 'INTERNAL_ERROR' && typeof error?.message === 'string' && error.message.length > 0 && !error.message.includes('\n')) {
+  } else if (
+    canEchoErrorMessage(error, classified.category) &&
+    typeof error?.message === 'string' &&
+    error.message.length > 0 &&
+    !error.message.includes('\n')
+  ) {
     userMessage = error.message;
   }
 

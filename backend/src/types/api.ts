@@ -3,6 +3,7 @@ import type { VerificationCode } from '../services/payment-verification';
 import {
   ErrorCategory,
   DOMAIN_ERROR_TAXONOMY,
+  canEchoErrorMessage,
   classifyError,
 } from '../errors/error-taxonomy';
 
@@ -119,7 +120,9 @@ export function sendFailure(
     const classified = classifyError(error);
     const message =
       classified.customMessage ||
-      (typeof error.message === 'string' && error.message.length > 0
+      (canEchoErrorMessage(error, classified.category) &&
+      typeof error.message === 'string' &&
+      error.message.length > 0
         ? error.message
         : classified.userSafeMessage);
 
