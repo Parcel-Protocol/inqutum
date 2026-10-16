@@ -532,6 +532,11 @@ curl -s "https://horizon-testnet.stellar.org/transactions/<TX_HASH>" | jq .
 - **Timestamp:** When the issue was detected (UTC).
 - **Duration:** How long the incident lasted.
 - **Impact:** Number of affected invoices, sellers, or failed operations.
+  Use `computeUserImpactReport()` from `scripts/incident-drill.ts` against the
+  set of invoices found in [Record reconciliation](#record-reconciliation)
+  above to compute these figures (and masked seller keys) rather than
+  counting by hand; `npx tsx scripts/incident-drill.ts --json` runs it
+  against a sample fixture to verify the check itself still works.
 - **Category:** Which incident category (1--6 above).
 - **Correlation IDs:** From the ops health report or observability metrics.
   Never include raw data, secrets, or full keys.

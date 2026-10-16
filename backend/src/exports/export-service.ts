@@ -11,6 +11,11 @@
  *    requester keeps a bounded number of artifacts.
  *  - Size: generation pages through storage and stops at maxRecords, marking
  *    the export `truncated` so nothing is silently cut.
+ *  - Cancellation: `create` accepts an optional AbortSignal, checked between
+ *    storage pages, so a caller that disconnects or times out mid-export can
+ *    stop in-flight work. No partial artifact is ever persisted — `this.
+ *    artifacts.set` only runs after the full page loop completes, so a
+ *    cancelled export leaves no stale/incomplete record to clean up.
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -84,6 +89,13 @@ export class ExportForbiddenError extends Error {
   constructor(message = 'You can only export your own invoices') {
     super(message);
     this.name = 'ExportForbiddenError';
+  }
+}
+
+export class ExportCancelledError extends Error {
+  constructor(message = 'Export was cancelled before it completed') {
+    super(message);
+    this.name = 'ExportCancelledError';
   }
 }
 
@@ -161,15 +173,25 @@ export class ExportService {
    * @param requester wallet asking for the export
    * @param scope wallet whose data is requested; defaults to the requester and
    *              must equal it, otherwise the export is denied
+   * @param signal optional AbortSignal; checked between storage pages so a
+   *               caller that disconnects or times out can cancel a large
+   *               export in flight. Throws ExportCancelledError on abort.
    */
-  async create(requester: string, request: ExportRequest, scope: string = requester): Promise<ExportArtifact> {
+  async create(
+    requester: string,
+    request: ExportRequest,
+    scope: string = requester,
+    signal?: AbortSignal
+  ): Promise<ExportArtifact> {
     if (scope !== requester) throw new ExportForbiddenError();
     this.purgeExpired();
 
     const records: ExportRecord[] = [];
     let truncated = false;
     for (let offset = 0; !truncated; offset += this.pageSize) {
+      if (signal?.aborted) throw new ExportCancelledError();
       const page = await this.storage.getInvoicesBySeller(requester, request.status, this.pageSize, offset);
+      if (signal?.aborted) throw new ExportCancelledError();
       for (const invoice of page) {
         // Defence in depth: never emit a row that is not the requester's.
         if (invoice.sellerPublicKey !== requester) continue;

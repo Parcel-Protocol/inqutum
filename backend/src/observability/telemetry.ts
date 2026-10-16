@@ -3,6 +3,19 @@
  *
  * Implements latency measurement, failure rate tracking, business-critical conversion funnels,
  * correlation ID propagation, and sensitive value redaction (private keys, secrets, tokens).
+ *
+ * High-cardinality telemetry protection (operational notes):
+ * - Failure mode: an attacker hitting many distinct unmatched URL paths (or
+ *   triggering many distinct error codes) could otherwise grow
+ *   `MetricsRegistry`'s label-keyed maps without bound, exhausting memory
+ *   and drowning real signal in dashboards.
+ * - Mitigation: `sanitizeLabelValue` collapses dynamic path/ID-like segments
+ *   to a placeholder before they become part of a metric label, and
+ *   `boundedIncrement` caps each affected map at `MAX_METRIC_CARDINALITY`
+ *   (500) distinct keys, folding anything beyond that into a single
+ *   `__cardinality_overflow__` bucket rather than a new entry.
+ * - Rollback: both are purely additive to existing label construction; a
+ *   revert is a simple code revert with no schema or data migration.
  */
 
 import { Request, Response, NextFunction } from 'express';
@@ -81,6 +94,40 @@ export function sanitizeForLogging(data: any): any {
   }
 
   return data;
+}
+
+/**
+ * Collapse high-cardinality, attacker-influenceable label segments (e.g. raw
+ * unmatched URL paths) into a bounded, dashboard-friendly placeholder, so a
+ * flood of distinct paths/codes cannot grow metric label sets unboundedly.
+ */
+export function sanitizeLabelValue(value: string, maxLength = 80): string {
+  if (!value) return value;
+  const collapsed = value
+    // UUID-like segments
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':id')
+    // long hex/alphanumeric segments (hashes, keys, tokens embedded in a path)
+    .replace(/\b[0-9a-zA-Z]{16,}\b/g, ':id')
+    // purely numeric path segments
+    .replace(/\/\d+(?=\/|$)/g, '/:id');
+  return collapsed.length > maxLength ? collapsed.slice(0, maxLength) + '...' : collapsed;
+}
+
+/** Shared bucket key for labels that exceed the per-metric cardinality cap. */
+const CARDINALITY_OVERFLOW_KEY = '__cardinality_overflow__';
+
+/**
+ * Bounds a Map-based counter's cardinality: once `map` already holds
+ * `maxCardinality` distinct keys, any *new* key is folded into a shared
+ * overflow bucket instead of growing the map further, so abusive traffic
+ * with always-novel labels cannot exhaust memory.
+ */
+function boundedIncrement(map: Map<string, number>, key: string, maxCardinality: number): void {
+  if (!map.has(key) && map.size >= maxCardinality) {
+    map.set(CARDINALITY_OVERFLOW_KEY, (map.get(CARDINALITY_OVERFLOW_KEY) || 0) + 1);
+    return;
+  }
+  map.set(key, (map.get(key) || 0) + 1);
 }
 
 /**
@@ -163,6 +210,9 @@ export class OperationLatencyStats {
 export class MetricsRegistry {
   private static instance: MetricsRegistry;
 
+  /** Maximum distinct label combinations retained per bounded metric map. */
+  private static readonly MAX_METRIC_CARDINALITY = 500;
+
   private operationStats: Map<string, OperationLatencyStats> = new Map();
   private httpRequests: Map<string, number> = new Map();
   private errorCounts: Map<string, number> = new Map();
@@ -203,8 +253,8 @@ export class MetricsRegistry {
     stats.record(latency_ms, result === 'failure');
 
     if (error_code) {
-      const errKey = `${operation}:${error_code}`;
-      this.errorCounts.set(errKey, (this.errorCounts.get(errKey) || 0) + 1);
+      const errKey = `${operation}:${sanitizeLabelValue(error_code)}`;
+      boundedIncrement(this.errorCounts, errKey, MetricsRegistry.MAX_METRIC_CARDINALITY);
     }
 
     // Structured logging
@@ -231,8 +281,8 @@ export class MetricsRegistry {
   }
 
   recordHttpRequest(method: string, route: string, statusCode: number): void {
-    const key = `${method.toUpperCase()} ${route} ${statusCode}`;
-    this.httpRequests.set(key, (this.httpRequests.get(key) || 0) + 1);
+    const key = `${method.toUpperCase()} ${sanitizeLabelValue(route)} ${statusCode}`;
+    boundedIncrement(this.httpRequests, key, MetricsRegistry.MAX_METRIC_CARDINALITY);
   }
 
   recordFunnelStage(stage: 'invoice_created' | 'payment_page_viewed' | 'payment_initiated' | 'payment_verified'): void {

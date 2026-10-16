@@ -8,6 +8,7 @@ import {
   EXPORT_SCHEMA_VERSION,
   ExportForbiddenError,
   ExportConfigurationError,
+  ExportCancelledError,
   ExportService,
   csvCell,
   toExportRecord,
@@ -107,6 +108,50 @@ describe('Data export workflow (Issue #52)', () => {
       assert.equal(svc.get(SELLER_A, meta.exportId).state, 'ok');
       assert.equal(svc.get(SELLER_B, meta.exportId).state, 'not_found');
       assert.equal(svc.get(SELLER_A, 'nope').state, 'not_found');
+    });
+  });
+
+  describe('permission-aware export pipeline (Issue #241)', () => {
+    it('never emits a field outside the allow-list even for genuinely stored PII', async () => {
+      await seed(SELLER_A, 1, { customerEmail: 'customer@example.com', customerName: 'Jane Customer' });
+      const doc = JSON.parse((await service().create(SELLER_A, { format: 'json' })).body);
+      const keys = Object.keys(doc.records[0]);
+      for (const key of keys) {
+        assert.ok((EXPORT_FIELDS as readonly string[]).includes(key), `unexpected field leaked: ${key}`);
+      }
+      assert.equal('customerEmail' in doc.records[0], false);
+      assert.equal('customerName' in doc.records[0], false);
+    });
+
+    it('rejects an export cancelled before it starts', async () => {
+      await seed(SELLER_A, 5);
+      const controller = new AbortController();
+      controller.abort();
+      await assert.rejects(
+        service().create(SELLER_A, { format: 'json' }, SELLER_A, controller.signal),
+        ExportCancelledError
+      );
+    });
+
+    it('cancels a large export in flight and persists no artifact', async () => {
+      await seed(SELLER_A, 20);
+      const controller = new AbortController();
+
+      let pagesServed = 0;
+      const abortingStorage = {
+        getInvoicesBySeller: async (...args: Parameters<InvoiceStorage['getInvoicesBySeller']>) => {
+          pagesServed += 1;
+          if (pagesServed === 2) controller.abort();
+          return storage.getInvoicesBySeller(...args);
+        },
+      } as unknown as InvoiceStorage;
+
+      const cancellingSvc = new ExportService(abortingStorage, { now: () => clock, pageSize: 3 });
+      await assert.rejects(
+        cancellingSvc.create(SELLER_A, { format: 'json' }, SELLER_A, controller.signal),
+        ExportCancelledError
+      );
+      assert.equal(cancellingSvc.size(), 0, 'no partial artifact should be persisted on cancellation');
     });
   });
 

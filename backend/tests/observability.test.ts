@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   metrics,
   sanitizeForLogging,
+  sanitizeLabelValue,
   measureOperation,
   OperationLatencyStats,
 } from '../src/observability/telemetry';
@@ -181,6 +182,58 @@ describe('Observability & Telemetry System (Issue #50)', () => {
       assert.ok(text.includes('quittance_operations_total{operation="invoice.create",status="success"} 1'));
       assert.ok(text.includes('quittance_operation_duration_ms_bucket{operation="invoice.create"'));
       assert.ok(text.includes('quittance_conversion_funnel_total{stage="invoice_created"} 1'));
+    });
+  });
+
+  describe('High-Cardinality Telemetry Protection (Issue #239)', () => {
+    it('collapses dynamic path segments to bounded placeholders', () => {
+      assert.equal(sanitizeLabelValue('/invoices/550e8400-e29b-41d4-a716-446655440000'), '/invoices/:id');
+      assert.equal(sanitizeLabelValue('/invoices/1234'), '/invoices/:id');
+      assert.equal(
+        sanitizeLabelValue('/webhooks/9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c'),
+        '/webhooks/:id'
+      );
+      // Short, non-dynamic segments are left intact.
+      assert.equal(sanitizeLabelValue('/health'), '/health');
+    });
+
+    it('caps overly long label values that survive segment collapsing', () => {
+      // Short, distinct words joined by slashes/dashes: none individually
+      // match the ID-collapsing patterns, but the whole value is still long.
+      const long = '/' + Array.from({ length: 40 }, (_, i) => `seg-${i}`).join('/');
+      const result = sanitizeLabelValue(long, 80);
+      assert.ok(result.length <= 83); // 80 + '...'
+      assert.ok(result.endsWith('...'));
+    });
+
+    it('bounds httpRequests cardinality under an abusive volume of unmatched routes', () => {
+      for (let i = 0; i < 2000; i++) {
+        metrics.recordHttpRequest('GET', `/unmatched/${i}-${'x'.repeat(20)}`, 404);
+      }
+      const summary = metrics.getMetricsSummary();
+      const distinctKeys = Object.keys(summary.http_requests).length;
+      // MAX_METRIC_CARDINALITY (500) + 1 overflow bucket key, never unbounded.
+      assert.ok(distinctKeys <= 501, `expected bounded cardinality, got ${distinctKeys} keys`);
+      assert.ok(
+        Object.keys(summary.http_requests).some((k) => k.includes('__cardinality_overflow__')),
+        'expected an overflow bucket once the cap is exceeded'
+      );
+    });
+
+    it('bounds errorCounts cardinality under an abusive volume of distinct error codes', () => {
+      for (let i = 0; i < 2000; i++) {
+        metrics.recordOperation({
+          operation: 'invoice.create',
+          actor_type: 'anonymous',
+          result: 'failure',
+          latency_ms: 1,
+          correlation_id: `corr-${i}`,
+          error_code: `ERR_${i}_${'y'.repeat(20)}`,
+        });
+      }
+      const summary = metrics.getMetricsSummary();
+      const distinctKeys = Object.keys(summary.error_breakdown).length;
+      assert.ok(distinctKeys <= 501, `expected bounded cardinality, got ${distinctKeys} keys`);
     });
   });
 });
