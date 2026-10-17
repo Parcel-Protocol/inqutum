@@ -29,6 +29,7 @@
     "evidence:check": "tsx ../scripts/generate-evidence-pack.ts --check",
     "release:gate": "tsx ../scripts/release-readiness-gate.ts",
     "release:check": "tsx ../scripts/release-readiness-gate.ts --check",
+    "test:load:cardinality": "tsx ../scripts/load-cardinality-burst.ts",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

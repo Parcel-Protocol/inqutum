@@ -78,18 +78,14 @@ export interface AuditChainVerification {
   failure?: { index: number; eventId: string; reason: 'previous_hash' | 'event_hash' };
 }
 
+import { canonicalize } from '../security/canonical-serialization';
+
 function stableJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  const obj = value as Record<string, unknown>;
-  return `{${Object.keys(obj)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableJson(obj[key])}`)
-    .join(',')}}`;
+  return canonicalize(value);
 }
 
 function hashEvent(event: Omit<AuditEvent, 'hash'>): string {
-  return createHash('sha256').update(stableJson(event)).digest('hex');
+  return createHash('sha256').update(canonicalize(event)).digest('hex');
 }
 
 /**

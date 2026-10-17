@@ -6,6 +6,7 @@
  */
 
 import { createHmac, timingSafeEqual } from 'crypto';
+import { canonicalize } from '../security/canonical-serialization';
 
 export class WebhookVerificationError extends Error {
   readonly code: string;
@@ -23,23 +24,80 @@ export class WebhookVerificationError extends Error {
  * @returns true when the signature is valid
  */
 export function verifyWebhookSignature(
-  payload: string | Buffer,
+  payload: string | Buffer | unknown,
   signature: string,
   secret: string,
   timestamp: string
 ): boolean {
-  const body = typeof payload === 'string' ? payload : payload.toString('utf8');
+  let body: string;
+  if (typeof payload === 'string') {
+    body = payload;
+  } else if (Buffer.isBuffer(payload)) {
+    body = payload.toString('utf8');
+  } else {
+    body = canonicalize(payload);
+  }
+
   const expected = 'sha256=' + createHmac('sha256', secret)
     .update(timestamp + '.' + body)
     .digest('hex');
 
-  if (expected.length !== signature.length) return false;
+  if (expected.length !== signature.length) {
+    // If raw string check failed and it's valid JSON, try canonicalizing
+    if (typeof payload === 'string') {
+      try {
+        const parsed = JSON.parse(payload);
+        const canonicalBody = canonicalize(parsed);
+        if (canonicalBody !== payload) {
+          const canonicalExpected = 'sha256=' + createHmac('sha256', secret)
+            .update(timestamp + '.' + canonicalBody)
+            .digest('hex');
+          if (canonicalExpected.length === signature.length) {
+            return timingSafeEqual(Buffer.from(canonicalExpected), Buffer.from(signature));
+          }
+        }
+      } catch {
+        // Not JSON
+      }
+    }
+    return false;
+  }
 
   try {
-    return timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+    const match = timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+    if (match) return true;
+
+    // Fallback: If body was JSON string with different key order, try canonical form
+    if (typeof payload === 'string') {
+      try {
+        const parsed = JSON.parse(payload);
+        const canonicalBody = canonicalize(parsed);
+        if (canonicalBody !== payload) {
+          const canonicalExpected = 'sha256=' + createHmac('sha256', secret)
+            .update(timestamp + '.' + canonicalBody)
+            .digest('hex');
+          if (canonicalExpected.length === signature.length) {
+            return timingSafeEqual(Buffer.from(canonicalExpected), Buffer.from(signature));
+          }
+        }
+      } catch {
+        // Not JSON
+      }
+    }
+    return false;
   } catch {
     return false;
   }
+}
+
+/**
+ * Compute the canonical HMAC-SHA256 webhook signature for a payload.
+ */
+export function signWebhookPayload(payload: unknown, secret: string, timestamp: string): string {
+  const body = typeof payload === 'string' ? payload : canonicalize(payload);
+  return 'sha256=' + createHmac('sha256', secret)
+    .update(timestamp + '.' + body)
+    .digest('hex');
 }
 
 /**

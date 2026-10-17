@@ -30,7 +30,22 @@ The exit code is `1` when any check is `FAIL`, and `0` otherwise, warnings inclu
    - `FAIL`: the lockfile is missing, or its root entry disagrees with `package.json`. `npm ci` refuses both states. Fix by running `npm install` in that workspace and committing the lockfile.
    - `WARN`: the lockfile is in sync, but packages are not installed, or are installed at a version other than the lockfile's (stale after a pull). Fix with `npm ci`, which is safe to re-run.
 7. **Admin Authorization Secrets**: `JOBS_ADMIN_TOKEN` guards `/api/jobs` and `/api/ops/*`. `MAINTAINER_INTENT_SECRET` enables high-impact intents. Flags secrets shorter than 16 characters. A short `MAINTAINER_INTENT_SECRET` silently leaves approvals disabled. Also flags an intent secret set without the admin token, which leaves the intent routes unreachable. This is `WARN` in development and `FAIL` when `NODE_ENV=production`. Values are never printed.
-8. **Stellar Horizon Reachability** (`--network` only): `GET` on the Horizon root, comparing its `network_passphrase` with the passphrase for `STELLAR_NETWORK`: `Test SDF Network ; September 2015` for TESTNET, `Public Global Stellar Network ; September 2015` for PUBLIC ([Stellar networks](https://developers.stellar.org/docs/networks)). A mismatch is `FAIL`, because payments would be verified on the wrong network.
+8. **Database Seed & Schema Fixtures**: Validates `db/seed.sql` and `db/schema.sql` presence, valid Stellar demo wallet addresses (`G...`), positive amounts, and insert statement structure.
+9. **Common Setup & Failure Fixes**: Detects missing local `.env` files, port configuration collisions (e.g. backend `PORT=3000` conflicting with Next.js frontend port `3000`), and uninstalled dependencies.
+10. **Stellar Horizon Reachability** (`--network` only): `GET` on the Horizon root, comparing its `network_passphrase` with the passphrase for `STELLAR_NETWORK`: `Test SDF Network ; September 2015` for TESTNET, `Public Global Stellar Network ; September 2015` for PUBLIC ([Stellar networks](https://developers.stellar.org/docs/networks)). A mismatch is `FAIL`, because payments would be verified on the wrong network.
+
+## Automated Fixes (`--fix`)
+
+Contributors can pass `--fix` to automatically and safely remediate common local setup issues:
+
+```bash
+npm run diagnostics -- --fix
+```
+
+When `--fix` is passed:
+- Missing `backend/.env` is safely created from `backend/env.mvp.example`.
+- Missing `frontend/.env.local` is safely created from `frontend/env.mvp.local`.
+- Non-destructive and safe to re-run. Existing `.env` files are never overwritten.
 
 ## Retry, authorization and failure behaviour
 
@@ -50,6 +65,8 @@ Worst case, the probe takes 5 × 10 s plus 15 s of backoff, about 65 s. Without 
 
 | Finding | Action |
 |---------|--------|
+| Missing `.env` or `.env.local` | Run `npm run diagnostics -- --fix` to auto-populate from templates. |
+| Port 3000/3001 collision | Ensure `PORT=3001` in `backend/.env` so it does not conflict with frontend port 3000. |
 | Lockfile drift | `cd <workspace> && npm install`, review the diff, commit `package-lock.json`. |
 | Missing or stale packages | `cd <workspace> && npm ci`. |
 | Horizon passphrase mismatch | Fix `STELLAR_HORIZON_URL` or `STELLAR_NETWORK` in `backend/.env`. Restart the API. |
@@ -57,8 +74,8 @@ Worst case, the probe takes 5 × 10 s plus 15 s of backoff, about 65 s. Without 
 
 ## Safety Guarantee
 
-The diagnostics command is strictly **read-only** and performs non-destructive health probes. It never writes, alters, or resets production or staging records. The only network call is the opt-in Horizon `GET`, which sends no credentials.
+The diagnostics command defaults to strictly **read-only** and performs non-destructive health probes. The `--fix` option only creates missing local development template files and never touches databases or network state.
 
 ## Compatibility
 
-`runDiagnostics(env)` keeps its signature. The second argument (`{ network, rootDir, probe }`) is optional. The new `dependencies` and `authorization` categories extend the `category` union. Existing consumers that switch on known categories are unaffected.
+`runDiagnostics(env)` keeps its signature. The second argument (`{ network, rootDir, probe, fix }`) is optional. Existing consumers that switch on known categories are unaffected.

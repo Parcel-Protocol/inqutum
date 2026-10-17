@@ -10,6 +10,8 @@ import {
   checkWorkspaceDependencies,
   checkAdminAuthorization,
   checkHorizonNetwork,
+  checkSeedData,
+  checkCommonFailureFixes,
   STELLAR_NETWORK_PASSPHRASES,
 } from '../../scripts/diagnostics';
 import type { ProbeOptions } from '../../scripts/http-probe';
@@ -238,5 +240,87 @@ describe('Contributor diagnostics: dependency, authorization and network validat
     const probed = await runDiagnostics({ NODE_ENV: 'development' }, { network: true, probe: networkRun.probe });
     assert.equal(networkRun.calls.length, 1);
     assert.equal(probed.results.find((r) => r.name === 'Stellar Horizon Reachability')?.status, 'PASS');
+  });
+
+  describe('database seed data and schema fixtures (Issue #258)', () => {
+    it('passes when db/seed.sql and db/schema.sql are present and structurally valid', () => {
+      const root = path.resolve(__dirname, '../..');
+      const result = checkSeedData(root, {});
+      assert.equal(result.status, 'PASS');
+      assert.match(result.message, /demo seller wallets configured/);
+    });
+
+    it('fails when db/seed.sql is missing', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-test-'));
+      try {
+        const result = checkSeedData(tempDir, {});
+        assert.equal(result.status, 'FAIL');
+        assert.match(result.message, /db\/seed\.sql is missing/);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('warns when db/seed.sql has no Stellar G-addresses', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-test-'));
+      const dbDir = path.join(tempDir, 'db');
+      fs.mkdirSync(dbDir, { recursive: true });
+      fs.writeFileSync(path.join(dbDir, 'schema.sql'), 'CREATE TABLE invoices();');
+      fs.writeFileSync(path.join(dbDir, 'seed.sql'), 'SELECT 1;');
+      try {
+        const result = checkSeedData(tempDir, {});
+        assert.equal(result.status, 'WARN');
+        assert.match(result.message, /no standard Stellar G\.\.\. seller addresses/);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('common setup failure fixes and --fix automation (Issue #258)', () => {
+    it('detects missing backend/.env and applies safe automated fix when fix=true', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fix-test-'));
+      const backendDir = path.join(tempDir, 'backend');
+      const frontendDir = path.join(tempDir, 'frontend');
+      fs.mkdirSync(backendDir, { recursive: true });
+      fs.mkdirSync(frontendDir, { recursive: true });
+      fs.writeFileSync(path.join(backendDir, 'env.mvp.example'), 'PORT=3001\n');
+      fs.writeFileSync(path.join(frontendDir, 'env.mvp.local'), 'NEXT_PUBLIC_API_URL=http://localhost:3001/api\n');
+
+      try {
+        // Without fix: warns that backend/.env is missing
+        const dryRun = checkCommonFailureFixes(tempDir, {}, { fix: false });
+        assert.equal(dryRun.status, 'WARN');
+        assert.match(dryRun.message, /backend\/\.env is missing/);
+
+        // With fix: creates .env from example
+        const fixedRun = checkCommonFailureFixes(tempDir, {}, { fix: true });
+        assert.equal(fixedRun.status, 'PASS');
+        assert.match(fixedRun.message, /Auto-fixes applied successfully/);
+        assert.ok(fs.existsSync(path.join(backendDir, '.env')));
+        assert.ok(fs.existsSync(path.join(frontendDir, '.env.local')));
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('warns when backend PORT conflicts with frontend default port 3000', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'port-test-'));
+      const backendDir = path.join(tempDir, 'backend');
+      const frontendDir = path.join(tempDir, 'frontend');
+      fs.mkdirSync(backendDir, { recursive: true });
+      fs.mkdirSync(frontendDir, { recursive: true });
+      fs.writeFileSync(path.join(backendDir, '.env'), 'PORT=3000\n');
+      fs.writeFileSync(path.join(frontendDir, '.env.local'), 'PORT=3000\n');
+
+      try {
+        const result = checkCommonFailureFixes(tempDir, { PORT: '3000' });
+        assert.equal(result.status, 'WARN');
+        assert.match(result.message, /conflicts with default frontend Next\.js port/);
+        assert.match(result.remediation ?? '', /Set PORT=3001/);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
   });
 });

@@ -174,6 +174,18 @@ matching the filter, not the page size.
 | `POST` | `/api/ops/stale-projections/repair` | `admin` | 200, 401, 403 | Automate repair recommendations for detected projection drift. |
 | `POST` | `/api/ops/synthetic-journey/run` | `admin` | 200, 401, 403, 503 | Run synthetic journey monitor across critical workflow with latency and dependency blame. |
 | `POST` | `/api/ops/snapshot-restore/verify` | `admin` | 200, 401, 403, 422 | Verify snapshot restore package against data invariants and rebuild derived indexes. |
+| `GET` | `/api/ops/dependencies/matrix` | `admin` | 200, 401, 403 | Inspect declared external dependencies, health probes and failure modes. |
+| `GET` | `/api/ops/dependencies` | `admin` | 200, 401, 403, 503 | Live health and degradation check across external dependencies. |
+| `GET` | `/api/ops/partial-failures` | `admin` | 200, 400, 401, 403 | Dashboard view of stuck and partially-failed background operations. |
+| `GET` | `/api/ops/partial-failures/:id` | `admin` | 200, 401, 403, 404 | Detailed inspection and recovery recommendation for one partial failure. |
+| `POST` | `/api/ops/partial-failures/:id/retry` | `admin` | 200, 401, 403, 404, 409, 422, 503 | Safely retry a stuck or dead partial failure operation with idempotency guard. |
+| `POST` | `/api/ops/intents` | `admin` | 201, 401, 403, 409 | Declare intent for a high-impact maintainer action with risk assessment. |
+| `GET` | `/api/ops/intents` | `admin` | 200, 401, 403 | List declared maintainer intents, optionally filtered by status. |
+| `POST` | `/api/ops/intents/:id/approve` | `admin` | 200, 401, 403, 409 | Second-maintainer approval for high-impact actions. |
+| `POST` | `/api/ops/intents/:id/reject` | `admin` | 200, 401, 403, 409 | Explicit maintainer rejection of an action intent. |
+| `POST` | `/api/ops/intents/:id/execute` | `admin` | 200, 401, 403, 409, 502 | Execute an approved intent with confirmation phrase; produces a signed receipt. |
+| `GET` | `/api/ops/receipts` | `admin` | 200, 401, 403 | List signed maintainer action receipts and verify hash chain integrity. |
+| `GET` | `/api/ops/receipts/:id` | `admin` | 200, 401, 403, 404 | Inspect a single maintainer action receipt with cryptographic signature verification. |
 | `POST` | `/api/webhooks/incoming` | `hmac` (conditional) | 200, 400, 401, 408, 409 | Signed inbound webhook receiver. Rejects unsigned, stale and replayed events. |
 
 `/api/webhooks/incoming` is mounted only when `WEBHOOK_SIGNING_SECRET` is set.
