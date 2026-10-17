@@ -306,7 +306,7 @@ export const API_CONTRACT: ContractEndpoint[] = [
     surfaces: BOTH,
     auth: 'none',
     summary: 'Email an invoice to its customer.',
-    responses: [200, 404, 500],
+    responses: [200, 400, 404, 409, 422, 500],
   },
 
   // ── Audit ───────────────────────────────────────────────────────────────
@@ -433,7 +433,7 @@ export const API_CONTRACT: ContractEndpoint[] = [
     surfaces: BOTH,
     auth: 'none',
     summary: 'Generate an export artifact. Returns an expiring download handle.',
-    responses: [201, 400, 403, 500],
+    responses: [201, 400, 403, 500, 503],
   },
   {
     method: 'GET',
@@ -501,7 +501,7 @@ export const API_CONTRACT: ContractEndpoint[] = [
     surfaces: PG_ONLY,
     auth: 'none',
     summary: 'Send an email through the configured provider.',
-    responses: [200, 400, 429, 502],
+    responses: [200, 400, 409, 422, 429, 502],
   },
   {
     method: 'GET',
@@ -621,6 +621,24 @@ export const API_CONTRACT: ContractEndpoint[] = [
     auth: 'admin',
     summary: 'Automate repair recommendations for detected projection drift.',
     responses: [200, 401, 403],
+  },
+  {
+    method: 'POST',
+    path: '/api/ops/projections/search-index/replay',
+    group: 'admin',
+    surfaces: PG_ONLY,
+    auth: 'admin',
+    summary: 'Rebuild the search index by replaying the audit trail through a versioned projector. Dry run by default.',
+    responses: [200, 400, 401, 403, 409],
+  },
+  {
+    method: 'POST',
+    path: '/api/ops/projections/search-index/rollback',
+    group: 'admin',
+    surfaces: PG_ONLY,
+    auth: 'admin',
+    summary: 'Restore the search index that the last applied replay replaced.',
+    responses: [200, 401, 403, 409],
   },
   {
     method: 'POST',

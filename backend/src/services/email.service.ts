@@ -13,6 +13,12 @@ import {
   paymentProofReceiptEngine,
 } from '../templates/invoice-email-templates';
 import type { RenderedEmail, TemplateContextData } from '../templates/email-template-engine';
+import {
+  MemoryCheckpointStore,
+  fingerprintOf,
+  runWithCheckpoint,
+  type CheckpointStore,
+} from '../recovery/side-effect-checkpoint';
 
 export type EmailTemplateType = 'payment_request' | 'payment_proof';
 
@@ -86,7 +92,9 @@ export class MemoryEmailTransport implements EmailTransport {
 export class EmailService {
   constructor(
     private readonly transport: EmailTransport = new MemoryEmailTransport(),
-    private readonly defaultSender = 'noreply@quittance.app'
+    private readonly defaultSender = 'noreply@quittance.app',
+    /** Recovery checkpoints for keyed sends (#289). */
+    private readonly checkpoints: CheckpointStore = new MemoryCheckpointStore()
   ) {}
 
   /**
@@ -168,7 +176,14 @@ export class EmailService {
   async sendInvoiceEmail(
     invoice: StoredInvoice,
     templateType: EmailTemplateType = 'payment_request',
-    options: EmailRenderOptions & { recipientEmail?: string } = {}
+    options: EmailRenderOptions & {
+      recipientEmail?: string;
+      /**
+       * When set, the send is checkpointed (#289): a retry with the same key
+       * returns the first result instead of emailing the client twice.
+       */
+      idempotencyKey?: string;
+    } = {}
   ): Promise<{ success: boolean; messageId: string; recipient: string; subject: string }> {
     const recipient = options.recipientEmail || invoice.customerEmail;
     if (!recipient) {
@@ -182,13 +197,19 @@ export class EmailService {
     const rendered = this.renderEmail(invoice, templateType, options);
     const from = options.senderAddress || this.defaultSender;
 
-    const result = await this.transport.sendMail({
-      from,
-      to: recipient,
-      subject: rendered.subject,
-      html: rendered.html,
-      text: rendered.text,
-    });
+    const mail = { from, to: recipient, subject: rendered.subject, html: rendered.html, text: rendered.text };
+    const result = options.idempotencyKey
+      ? await runWithCheckpoint(
+          this.checkpoints,
+          // Scoped to the invoice so one key cannot replay another invoice's result.
+          {
+            key: `invoice-email:${invoice.id}:${options.idempotencyKey}`,
+            effect: 'email.invoice',
+            fingerprint: fingerprintOf([mail.from, mail.to, mail.subject, mail.html, mail.text]),
+          },
+          () => this.transport.sendMail(mail)
+        )
+      : await this.transport.sendMail(mail);
 
     return {
       success: true,

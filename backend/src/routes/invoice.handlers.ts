@@ -28,6 +28,11 @@ import { classifyError } from '../errors/error-taxonomy';
 import { ConflictError } from '../concurrency/optimistic-lock';
 import { invoiceLockManager } from '../concurrency/lock-manager';
 import { safeFrontendOrigin } from '../security/content-safety';
+import {
+  CheckpointInDoubtError,
+  CheckpointInProgressError,
+  CheckpointKeyReusedError,
+} from '../recovery/side-effect-checkpoint';
 import { NotificationService, notificationService } from '../notifications/notification-service';
 import { EmailService, emailService, EmailTemplateType } from '../services/email.service';
 import type { VerificationCode } from '../services/payment-verification';
@@ -1142,9 +1147,19 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           });
         }
 
+        // Optional retry key (#289); bounded so the checkpoint key fits its column.
+        const idempotencyKey = req.headers?.['idempotency-key'];
+        if (idempotencyKey !== undefined && (typeof idempotencyKey !== 'string' || !idempotencyKey || idempotencyKey.length > 200)) {
+          return sendFailure(res, 400, 'Idempotency-Key must be 1-200 characters', {
+            code: 'INVALID_IDEMPOTENCY_KEY',
+            correlationId: corrId,
+          });
+        }
+
         const result = await emails.sendInvoiceEmail(invoice, templateType, {
           frontendUrl: frontendUrl(),
           recipientEmail,
+          idempotencyKey,
         });
 
         // Record audit trail event for sent email
@@ -1194,6 +1209,22 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           sentAt: new Date().toISOString(),
         });
       } catch (error: any) {
+        if (error instanceof CheckpointKeyReusedError) {
+          return sendFailure(res, 422, error.message, {
+            code: 'IDEMPOTENCY_KEY_REUSED',
+            category: 'VALIDATION',
+            retryable: false,
+            correlationId: corrId,
+          });
+        }
+        if (error instanceof CheckpointInProgressError || error instanceof CheckpointInDoubtError) {
+          return sendFailure(res, 409, error.message, {
+            code: error instanceof CheckpointInDoubtError ? 'EMAIL_OUTCOME_IN_DOUBT' : 'EMAIL_SEND_IN_PROGRESS',
+            category: 'LIFECYCLE',
+            retryable: error instanceof CheckpointInProgressError,
+            correlationId: corrId,
+          });
+        }
         logError('Send invoice email error:', error);
         sendFailure(res, 500, error.message || 'Failed to send invoice email', {
           correlationId: corrId,

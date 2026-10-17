@@ -56,6 +56,21 @@ export class ImportAbortedError extends Error {
   }
 }
 
+/**
+ * Raised when an import or rollback is cancelled (#288). It is only ever thrown
+ * before COMMIT, so the transaction was rolled back and nothing was written.
+ */
+export class ImportCancelledError extends Error {
+  constructor(message = 'Import was cancelled before it committed; no rows were written') {
+    super(message);
+    this.name = 'ImportCancelledError';
+  }
+}
+
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new ImportCancelledError();
+}
+
 const COLUMNS = [
   'seller_public_key',
   'seller_name',
@@ -87,6 +102,11 @@ export interface ApplyOptions {
   source: string;
   now?: () => Date;
   client?: ImportClient;
+  /**
+   * Checked before every row and once more before COMMIT. An abort after COMMIT
+   * is ignored: the import has landed and the caller still gets its snapshot.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -192,6 +212,7 @@ export async function applyImport(
     );
   }
 
+  throwIfCancelled(options.signal);
   const now = options.now?.() ?? new Date();
   const ownsClient = options.client === undefined;
   const client = options.client ?? (await db.connect());
@@ -210,6 +231,7 @@ export async function applyImport(
     await client.query('BEGIN');
 
     for (const row of plan.rows) {
+      throwIfCancelled(options.signal);
       if (row.action === 'create') {
         const inserted = await insertRow(client, row, options, now);
         created.push({ line: row.line, ...inserted });
@@ -264,6 +286,7 @@ export async function applyImport(
       updated.push({ line: row.line, id: row.existingId, changed: Object.keys(row.changes) });
     }
 
+    throwIfCancelled(options.signal);
     await client.query('COMMIT');
   } catch (error) {
     // One transaction for the whole file: a failure on row 900 cannot leave
@@ -293,7 +316,11 @@ export async function applyImport(
 /**
  * Undo an applied import. Restores overwritten rows and deletes inserted ones.
  */
-export async function rollbackImport(db: ImportDatabase, snapshot: ImportSnapshot): Promise<{
+export async function rollbackImport(
+  db: ImportDatabase,
+  snapshot: ImportSnapshot,
+  signal?: AbortSignal
+): Promise<{
   restored: number;
   deleted: number;
 }> {
@@ -304,6 +331,7 @@ export async function rollbackImport(db: ImportDatabase, snapshot: ImportSnapsho
     return { restored: 0, deleted: 0 };
   }
 
+  throwIfCancelled(signal);
   const client = await db.connect();
   let restored = 0;
   let deleted = 0;
@@ -311,6 +339,7 @@ export async function rollbackImport(db: ImportDatabase, snapshot: ImportSnapsho
     await client.query('BEGIN');
 
     for (const { id, before } of snapshot.updated) {
+      throwIfCancelled(signal);
       const entries = Object.entries(before).filter(([key]) => key !== 'id');
       if (entries.length === 0) continue;
       const params: unknown[] = [id];
@@ -323,10 +352,12 @@ export async function rollbackImport(db: ImportDatabase, snapshot: ImportSnapsho
     }
 
     for (const { id } of snapshot.created) {
+      throwIfCancelled(signal);
       const result = await client.query('DELETE FROM invoices WHERE id = $1', [id]);
       deleted += result.rowCount ?? 0;
     }
 
+    throwIfCancelled(signal);
     await client.query('COMMIT');
   } catch (error) {
     try {

@@ -90,7 +90,7 @@ function stableJson(value: unknown): string {
     .join(',')}}`;
 }
 
-function hashEvent(event: Omit<AuditEvent, 'hash'>): string {
+export function hashEvent(event: Omit<AuditEvent, 'hash'>): string {
   return createHash('sha256').update(stableJson(event)).digest('hex');
 }
 
@@ -214,6 +214,11 @@ export class MemoryAuditStore {
       limit,
       offset,
     };
+  }
+
+  /** Every retained event, oldest first: the input to projection replay (#290). O(E). */
+  listChronological(): AuditEvent[] {
+    return [...this.events];
   }
 
   clear(): void {

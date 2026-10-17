@@ -22,6 +22,22 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import {
+  checkOutboundUrl,
+  checkPublicDestination,
+  type AddressLookup,
+  type AllowListViolation,
+  type OutboundUrlPolicy,
+} from '../security/allow-list';
+import {
+  CheckpointInDoubtError,
+  CheckpointInProgressError,
+  CheckpointKeyReusedError,
+  MemoryCheckpointStore,
+  fingerprintOf,
+  runWithCheckpoint,
+  type CheckpointStore,
+} from '../recovery/side-effect-checkpoint';
 
 export type EmailStatus = 'sent' | 'failed' | 'bounced' | 'complained';
 
@@ -32,7 +48,13 @@ export type EmailFailureCategory =
   | 'transient'
   | 'permanent'
   | 'invalid_recipient'
-  | 'config';
+  | 'config'
+  /** Another send with the same idempotency key is running (#289). */
+  | 'in_progress'
+  /** A previous send stopped mid-call; an operator must confirm the outcome (#289). */
+  | 'in_doubt'
+  /** The idempotency key was already used for a different message (#289). */
+  | 'key_reused';
 
 export interface EmailMessage {
   to: string;
@@ -297,6 +319,22 @@ export interface EmailDeliveryServiceOptions {
   retryDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+  /** Recovery checkpoints for keyed sends (#289). Defaults to a process-local store. */
+  checkpoints?: CheckpointStore;
+  /** A `started` checkpoint older than this is treated as a crashed send. */
+  checkpointStaleAfterMs?: number;
+}
+
+/** Identifies what a key was used for: the fields that make up the delivered email. */
+export function emailFingerprint(message: EmailMessage): string {
+  return fingerprintOf([message.to, message.subject, message.text ?? null, message.html ?? null, message.replyTo ?? null]);
+}
+
+/** Carries a failed result out of the checkpoint so it is recorded as `failed`. */
+class DeliveryFailed extends Error {
+  constructor(readonly result: EmailDeliveryResult) {
+    super(result.message ?? 'Email delivery failed');
+  }
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -308,6 +346,8 @@ export class EmailDeliveryService {
   private readonly retryDelayMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
+  private readonly checkpoints: CheckpointStore;
+  private readonly checkpointStaleAfterMs?: number;
 
   constructor(options: EmailDeliveryServiceOptions = {}) {
     this.transport = options.transport ?? disabledTransport;
@@ -316,6 +356,8 @@ export class EmailDeliveryService {
     this.retryDelayMs = options.retryDelayMs ?? 250;
     this.sleep = options.sleep ?? defaultSleep;
     this.now = options.now ?? (() => Date.now());
+    this.checkpoints = options.checkpoints ?? new MemoryCheckpointStore();
+    this.checkpointStaleAfterMs = options.checkpointStaleAfterMs;
   }
 
   /**
@@ -344,14 +386,51 @@ export class EmailDeliveryService {
       };
     }
 
-    // Never send the same logical email twice on a retry.
-    if (message.idempotencyKey) {
-      const existing = this.store.findByIdempotencyKey(message.idempotencyKey);
-      if (existing && existing.status === 'sent') {
-        return { status: 'sent', ok: true, delivery: existing, message: 'Already sent' };
-      }
-    }
+    // Never send the same logical email twice on a retry: the checkpoint below
+    // replays the first result for the same key and payload, and refuses the
+    // key for a different payload. Without a key the send is not deduplicated.
+    if (!message.idempotencyKey) return this.send(message);
 
+    try {
+      return await runWithCheckpoint(
+        this.checkpoints,
+        {
+          key: `email:${message.idempotencyKey}`,
+          effect: 'email.send',
+          fingerprint: emailFingerprint(message),
+          staleAfterMs: this.checkpointStaleAfterMs,
+          now: () => new Date(this.now()),
+        },
+        async () => {
+          const result = await this.send(message);
+          if (!result.ok) throw new DeliveryFailed(result);
+          return result;
+        }
+      );
+    } catch (error) {
+      if (error instanceof DeliveryFailed) return error.result;
+      if (error instanceof CheckpointInProgressError) {
+        return { status: 'failed', ok: false, category: 'in_progress', retryable: true, message: error.message };
+      }
+      if (error instanceof CheckpointKeyReusedError) {
+        return { status: 'failed', ok: false, category: 'key_reused', retryable: false, message: error.message };
+      }
+      if (error instanceof CheckpointInDoubtError) {
+        return { status: 'failed', ok: false, category: 'in_doubt', retryable: false, message: error.message };
+      }
+      // The checkpoint store is unreachable: refuse rather than send unrecorded.
+      return {
+        status: 'failed',
+        ok: false,
+        category: 'transient',
+        retryable: true,
+        message: `Delivery checkpoint unavailable: ${(error as Error).message}`,
+      };
+    }
+  }
+
+  /** One logical send: the transport call with bounded retries. Never throws. */
+  private async send(message: EmailMessage): Promise<EmailDeliveryResult> {
     let lastError: EmailDeliveryError | undefined;
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
       try {
@@ -443,16 +522,39 @@ export interface HttpApiTransportOptions {
   from: string;
   fetchImpl?: typeof fetch;
   providerName?: string;
+  /**
+   * Strict outbound allow-list (#291). When set, the endpoint is checked when
+   * the transport is built and its resolved addresses before every send.
+   */
+  allowList?: OutboundUrlPolicy & { lookup?: AddressLookup };
 }
 
 /** Transactional provider over HTTPS (no extra dependency required). */
 export function createHttpApiTransport(options: HttpApiTransportOptions): EmailTransport {
   const doFetch = options.fetchImpl ?? fetch;
+  const allowList = options.allowList;
+  // Fail at startup, not on the first customer email.
+  const endpoint = allowList ? checkOutboundUrl(options.endpoint, allowList) : null;
   return {
     name: options.providerName ?? 'http-api',
     async send(message: EmailMessage) {
+      if (endpoint) {
+        try {
+          await checkPublicDestination(endpoint.hostname, allowList?.lookup);
+        } catch (error) {
+          const violation = error as AllowListViolation;
+          // A DNS outage clears on its own; a private address is a misconfiguration.
+          const retryable = violation.code === 'DESTINATION_UNRESOLVABLE';
+          throw new EmailDeliveryError(violation.message, retryable ? 'transient' : 'config', {
+            retryable,
+            providerCode: violation.code,
+          });
+        }
+      }
       const response = await doFetch(options.endpoint, {
         method: 'POST',
+        // A redirect would re-send the message body to a host nobody allow-listed.
+        redirect: 'error',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${options.token}`,

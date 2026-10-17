@@ -145,7 +145,7 @@ cursor. These semantics are pinned by
 | `POST` | `/api/invoices/:id/cancel` | none | 200, 400, 404, 409 | Cancel a PENDING invoice. 409 once it is settled. |
 | `POST` | `/api/invoices/:id/verify` | none | 200, 400, 404, 500 | Verify a submitted payment and settle the invoice. |
 | `POST` | `/api/invoices/:id/simulate-payment` | none | 200, 404, 500 | Mark an invoice paid without contacting the network (sandbox only). |
-| `POST` | `/api/invoices/:id/send-email` | none | 200, 404, 500 | Email an invoice to its customer. |
+| `POST` | `/api/invoices/:id/send-email` | none | 200, 400, 404, 409, 422, 500 | Email an invoice to its customer. |
 | `GET` | `/api/invoices/:id/audit-trail` | none | 200, 404, 500 | Activity timeline for a single invoice. |
 | `GET` | `/api/audit/events` | none | 200, 500 | Query audit events across invoices, filtered by type and time. |
 | `GET` | `/api/audit/export` | none | 200, 500 | Stream a full audit export as a downloadable document. |
@@ -158,7 +158,7 @@ cursor. These semantics are pinned by
 | `GET` | `/api/notifications/preferences` | none | 200, 400 | Retrieve durable notification routing preferences for a recipient. |
 | `PUT` | `/api/notifications/preferences` | none | 200, 400 | Update durable notification routing preferences for a recipient. |
 | `GET` | `/api/notifications/routing-audit` | none | 200, 400 | Retrieve routing and override audit trail for a recipient. |
-| `POST` | `/api/exports` | none | 201, 400, 403, 500 | Generate an export artifact. Returns an expiring download handle. |
+| `POST` | `/api/exports` | none | 201, 400, 403, 500, 503 | Generate an export artifact. Returns an expiring download handle. |
 | `GET` | `/api/exports/:id` | none | 200, 400, 404, 410 | Download an export artifact. 410 once it has expired. |
 | `GET` | `/api/stellar/account` | none | 200 | Account balances from Horizon. |
 | `GET` | `/api/stellar/payments` | none | 200 | Recent payments for an account from Horizon. |
@@ -170,7 +170,7 @@ cursor. These semantics are pinned by
 | Method | Path | Auth | Statuses | Purpose |
 | --- | --- | --- | --- | --- |
 | `POST` | `/api/payment/sync` | none | 200, 500 | Run a manual payment-monitor sync sweep. |
-| `POST` | `/api/email/send` | none | 200, 400, 429, 502 | Send an email through the configured provider. |
+| `POST` | `/api/email/send` | none | 200, 400, 409, 422, 429, 502 | Send an email through the configured provider. |
 | `GET` | `/api/email/deliveries` | none | 200 | Recent delivery attempts with provider status. |
 | `GET` | `/api/email/problems` | none | 200 | Bounced and complained deliveries that need follow-up. |
 | `POST` | `/api/email/webhook` | none | 200, 400, 404 | Provider delivery callback (bounce / complaint / delivered). |
@@ -184,6 +184,8 @@ cursor. These semantics are pinned by
 | `POST` | `/api/ops/policy/simulate` | `admin` | 200, 400, 401, 403 | Simulate policy changes against current dataset before committing. |
 | `GET` | `/api/ops/stale-projections/detect` | `admin` | 200, 401, 403 | Detect projection drift, stale statuses, and orphaned records. |
 | `POST` | `/api/ops/stale-projections/repair` | `admin` | 200, 401, 403 | Automate repair recommendations for detected projection drift. |
+| `POST` | `/api/ops/projections/search-index/replay` | `admin` | 200, 400, 401, 403, 409 | Rebuild the search index by replaying the audit trail through a versioned projector. Dry run by default. |
+| `POST` | `/api/ops/projections/search-index/rollback` | `admin` | 200, 401, 403, 409 | Restore the search index that the last applied replay replaced. |
 | `POST` | `/api/ops/synthetic-journey/run` | `admin` | 200, 401, 403, 503 | Run synthetic journey monitor across critical workflow with latency and dependency blame. |
 | `POST` | `/api/ops/snapshot-restore/verify` | `admin` | 200, 401, 403, 422 | Verify snapshot restore package against data invariants and rebuild derived indexes. |
 | `POST` | `/api/ops/policy/dry-run` | `admin` | 200, 400, 401, 403, 503 | Dry-run a validated policy proposal: totals plus a paginated preview of affected records. |

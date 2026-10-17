@@ -3,12 +3,16 @@ import { z } from 'zod';
 import { stellarPublicKeySchema } from '../utils/validation';
 import { sendFailure, sendSuccess } from '../types/api';
 import type { InvoiceStorage } from '../storage/invoice-storage';
-import { ExportForbiddenError, ExportService } from '../exports/export-service';
+import { ExportCancelledError, ExportForbiddenError, ExportService } from '../exports/export-service';
 
 export interface ExportRouterOptions {
   storage: InvoiceStorage;
   service?: ExportService;
+  /** Server-side deadline for generating one export (#288). Defaults to 30 s. */
+  timeoutMs?: number;
 }
+
+export const DEFAULT_EXPORT_TIMEOUT_MS = 30_000;
 
 const requestSchema = z.object({
   requester: stellarPublicKeySchema,
@@ -28,6 +32,8 @@ const requestSchema = z.object({
  */
 export function createExportRouter(options: ExportRouterOptions): Router {
   const service = options.service ?? new ExportService(options.storage);
+  const timeoutMs = options.timeoutMs ?? DEFAULT_EXPORT_TIMEOUT_MS;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('timeoutMs must be a positive safe integer');
   const router = Router();
 
   router.post('/exports', async (req: Request, res: Response) => {
@@ -40,11 +46,22 @@ export function createExportRouter(options: ExportRouterOptions): Router {
     }
     const { requester, sellerPublicKey, format, status, from, to } = parsed.data;
 
+    // Cancellation (#288): a client that disconnects, or a run past the
+    // deadline, stops generation at the next storage page. `res` (not `req`)
+    // emits 'close' when the socket goes away before the response is written.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const onClose = () => {
+      if (!res.writableEnded) controller.abort();
+    };
+    res.on('close', onClose);
+
     try {
       const artifact = await service.create(
         requester,
         { format, status, from: from ? new Date(from) : undefined, to: to ? new Date(to) : undefined },
-        sellerPublicKey ?? requester
+        sellerPublicKey ?? requester,
+        controller.signal
       );
 
       if (options.storage.recordAuditEvent) {
@@ -69,8 +86,20 @@ export function createExportRouter(options: ExportRouterOptions): Router {
       if (error instanceof ExportForbiddenError) {
         return sendFailure(res, 403, error.message, { code: 'EXPORT_FORBIDDEN', correlationId: req.correlationId });
       }
+      if (error instanceof ExportCancelledError) {
+        // Nothing was stored. A disconnected client has nobody to answer.
+        if (res.destroyed) return;
+        return sendFailure(res, 503, 'Export took too long and was cancelled. Narrow the filters and try again.', {
+          code: 'EXPORT_TIMED_OUT',
+          retryable: true,
+          correlationId: req.correlationId,
+        });
+      }
       console.error('Export error:', (error as Error)?.stack ?? error);
       sendFailure(res, 500, 'Failed to generate export', { code: 'EXPORT_FAILED', correlationId: req.correlationId });
+    } finally {
+      clearTimeout(timer);
+      res.off('close', onClose);
     }
   });
 

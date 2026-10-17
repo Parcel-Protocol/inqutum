@@ -6,8 +6,9 @@
  *   npm run db:import -- --file invoices.csv --apply --on-error skip
  *   npm run db:import -- --rollback invoices.snapshot.json
  *
- * Exit codes: 0 success or a clean dry run, 1 the file has errors, 2 the
- * command itself failed (unreadable file, unreachable database).
+ * Exit codes: 0 success or a clean dry run, 1 the file has errors or is not
+ * an allowed file type, 2 the command itself failed (unreadable file,
+ * unreachable database), 130 cancelled by SIGINT/SIGTERM before COMMIT.
  */
 
 import * as fs from 'fs';
@@ -21,10 +22,22 @@ import {
   rollbackImport,
   loadExisting,
   ImportAbortedError,
+  ImportCancelledError,
   type ImportDatabase,
   type ImportSnapshot,
 } from './import-executor';
 import { pool } from '../config/database';
+import {
+  AllowListViolation,
+  DEFAULT_IMPORT_MAX_BYTES,
+  checkImportFileContent,
+  checkImportFileStat,
+} from '../security/allow-list';
+
+function importMaxBytes(): number {
+  const configured = Number(process.env.IMPORT_MAX_BYTES);
+  return Number.isSafeInteger(configured) && configured > 0 ? configured : DEFAULT_IMPORT_MAX_BYTES;
+}
 
 function parseArgs(argv: string[]): {
   file?: string;
@@ -117,12 +130,36 @@ function toExistingInvoice(row: Record<string, any>): ExistingInvoice {
   };
 }
 
+/**
+ * Cancellation (#288): the first SIGINT/SIGTERM aborts the run, which rolls the
+ * open transaction back at the next row boundary. A second signal exits at once;
+ * PostgreSQL aborts the transaction once its backend sees the connection is gone.
+ */
+function cancelOnSignal(): { signal: AbortSignal; dispose: () => void } {
+  const controller = new AbortController();
+  const onSignal = (name: NodeJS.Signals) => {
+    if (controller.signal.aborted) process.exit(130);
+    console.error(`\n${name} received: cancelling at the next row; press Ctrl-C again to exit immediately.`);
+    controller.abort();
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      process.off('SIGINT', onSignal);
+      process.off('SIGTERM', onSignal);
+    },
+  };
+}
+
 export async function runImportCli(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
 
   if (args.rollback) {
     const snapshot = JSON.parse(fs.readFileSync(args.rollback, 'utf-8')) as ImportSnapshot;
-    const outcome = await rollbackImport({ connect: () => pool.connect() }, snapshot);
+    const cancel = cancelOnSignal();
+    const outcome = await rollbackImport({ connect: () => pool.connect() }, snapshot, cancel.signal).finally(cancel.dispose);
     console.log(
       `Rolled back ${snapshot.source ?? 'import'}: ${outcome.restored} row(s) restored, ${outcome.deleted} deleted.`
     );
@@ -135,7 +172,9 @@ export async function runImportCli(argv: string[]): Promise<number> {
 
   const absolute = path.resolve(args.file);
   if (!fs.existsSync(absolute)) throw new Error(`file not found: ${absolute}`);
-  const text = fs.readFileSync(absolute, 'utf-8');
+  // Allow-list (#291): type and size are checked before a byte is read.
+  const encoding = checkImportFileStat(absolute, fs.statSync(absolute), importMaxBytes());
+  const { text } = checkImportFileContent(encoding, fs.readFileSync(absolute));
 
   const parsed = parseImportFile(absolute, text);
   if (parsed.errors.length > 0) {
@@ -170,7 +209,12 @@ export async function runImportCli(argv: string[]): Promise<number> {
   }
 
   const snapshotPath = args.snapshot ?? `${absolute}.snapshot.json`;
-  const result = await applyImport({ connect: () => pool.connect() }, plan, { source: absolute });
+  const cancel = cancelOnSignal();
+  const result = await applyImport({ connect: () => pool.connect() }, plan, {
+    source: absolute,
+    signal: cancel.signal,
+  }).finally(cancel.dispose);
+  // Written even if a signal arrived after COMMIT: the snapshot is the only undo.
   fs.writeFileSync(snapshotPath, JSON.stringify(result.snapshot, null, 2));
   fs.chmodSync(snapshotPath, 0o600);
 
@@ -182,6 +226,14 @@ if (require.main === module) {
   runImportCli(process.argv.slice(2))
     .then((code) => process.exit(code))
     .catch((error) => {
+      if (error instanceof ImportCancelledError) {
+        console.error(`\n${error.message}`);
+        process.exit(130);
+      }
+      if (error instanceof AllowListViolation) {
+        console.error(`\nFile rejected (${error.code}): ${error.message}`);
+        process.exit(1);
+      }
       if (error instanceof ImportAbortedError) console.error(`\n${error.message}`);
       else console.error(`\nImport failed: ${(error as Error).message}`);
       process.exit(2);

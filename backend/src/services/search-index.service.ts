@@ -94,6 +94,19 @@ export class PermissionAwareSearchIndex {
     return this.index.delete(invoiceId);
   }
 
+  /** Copies of every record, including deleted and revoked ones. O(n). */
+  public exportRecords(): IndexedInvoiceRecord[] {
+    return [...this.index.values()].map((record) => ({ ...record }));
+  }
+
+  /**
+   * Replaces the whole index in one synchronous step, so no reader observes a
+   * half-swapped projection (#290). O(n).
+   */
+  public replaceAll(records: readonly IndexedInvoiceRecord[]): void {
+    this.index = new Map(records.map((record) => [record.id, { ...record }]));
+  }
+
   /**
    * Retrieve total number of active non-deleted records in index.
    */

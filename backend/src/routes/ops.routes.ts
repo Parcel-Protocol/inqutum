@@ -36,6 +36,12 @@ import {
 import { jobsToOperations } from '../domain/partial-failures';
 import { ApprovalError, MaintainerApprovalService, type IntentStatus, type ReceiptOutcome } from '../ops/maintainer-approval';
 import { auditStore } from '../audit/audit-service';
+import {
+  NothingToRollBackError,
+  ProjectionReplayService,
+  ReplayInProgressError,
+  UnknownProjectorVersionError,
+} from '../ops/projection-replay';
 
 export interface OpsRouterOptions {
   storage: InvoiceStorage;
@@ -58,6 +64,8 @@ export interface OpsRouterOptions {
   capabilities?: CapabilityTokenService | null;
   /** Audited runtime configuration. Defaults to the process instance. */
   adminConfig?: AdminConfigService;
+  /** Search-index event replay (#290). Defaults to the live index and audit trail. */
+  replay?: ProjectionReplayService;
 }
 
 function defaultApprovals(): MaintainerApprovalService | null {
@@ -105,6 +113,13 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
   const retries = options.jobs ? new PartialFailureRetryCoordinator(options.jobs) : null;
   const capabilities = options.capabilities === undefined ? capabilityServiceFromEnv() : options.capabilities;
   const config = options.adminConfig ?? adminConfig;
+  const replay =
+    options.replay ??
+    new ProjectionReplayService({
+      storage: options.storage,
+      index: defaultSearchIndex,
+      events: () => auditStore.listChronological(),
+    });
 
   if (approvals && options.jobs) {
     const jobs = options.jobs;
@@ -401,6 +416,60 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
       res.json({ success: true, data: evidence, correlationId: req.correlationId });
     } catch (err) {
       next(err);
+    }
+  });
+
+  // Versioned event replay for the search-index projection (#290). Dry run by default.
+  router.post('/ops/projections/search-index/replay', admin, async (req, res, next) => {
+    const dryRun = req.body?.dryRun !== false;
+    const version = req.body?.projectorVersion;
+    if (version !== undefined && !Number.isSafeInteger(version)) {
+      return fail(res, req, 400, 'INVALID_PROJECTOR_VERSION', 'projectorVersion must be an integer');
+    }
+    try {
+      const report = await replay.replay({ dryRun, projectorVersion: version });
+      if (report.outcome === 'refused') {
+        return res.status(409).json({
+          success: false,
+          code: 'REPLAY_REFUSED',
+          error: `Replay not applied: ${report.reasons.join('; ')}`,
+          data: report,
+          correlationId: req.correlationId,
+        });
+      }
+      if (report.outcome === 'applied') {
+        auditStore.recordEvent({
+          action: 'MAINTAINER_ACTION',
+          actor: { type: 'maintainer', id: 'ops-admin' },
+          scope: { entityType: 'system', entityId: 'search_index' },
+          reason: 'Search index rebuilt by event replay',
+          metadata: { projectorVersion: report.projectorVersion, events: report.events.total, diff: report.diff },
+          correlationId: req.correlationId,
+        });
+      }
+      res.json({ success: true, data: report, correlationId: req.correlationId });
+    } catch (err) {
+      if (err instanceof UnknownProjectorVersionError) return fail(res, req, 400, 'INVALID_PROJECTOR_VERSION', err.message);
+      if (err instanceof ReplayInProgressError) return fail(res, req, 409, 'REPLAY_IN_PROGRESS', err.message);
+      next(err);
+    }
+  });
+
+  router.post('/ops/projections/search-index/rollback', admin, (req, res) => {
+    try {
+      const result = replay.rollback();
+      auditStore.recordEvent({
+        action: 'MAINTAINER_ACTION',
+        actor: { type: 'maintainer', id: 'ops-admin' },
+        scope: { entityType: 'system', entityId: 'search_index' },
+        reason: 'Search index replay rolled back',
+        metadata: result,
+        correlationId: req.correlationId,
+      });
+      res.json({ success: true, data: result, correlationId: req.correlationId });
+    } catch (err) {
+      if (err instanceof NothingToRollBackError) return fail(res, req, 409, 'NOTHING_TO_ROLL_BACK', err.message);
+      throw err;
     }
   });
 

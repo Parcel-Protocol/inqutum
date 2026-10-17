@@ -58,6 +58,22 @@ const FAILURE_CODES: Record<string, { status: number; code: string; recovery: st
     code: 'EMAIL_NOT_CONFIGURED',
     recovery: 'Email delivery is not configured for this deployment. See docs/EMAIL_DELIVERY.md.',
   },
+  in_progress: {
+    status: 409,
+    code: 'EMAIL_SEND_IN_PROGRESS',
+    recovery: 'A send with this idempotency key is still running. Retry in a moment to get its result.',
+  },
+  in_doubt: {
+    status: 409,
+    code: 'EMAIL_OUTCOME_IN_DOUBT',
+    recovery:
+      'A previous send stopped before its outcome was recorded. Check the provider log, then resolve the checkpoint (docs/RECOVERY_CHECKPOINTS.md).',
+  },
+  key_reused: {
+    status: 422,
+    code: 'EMAIL_IDEMPOTENCY_KEY_REUSED',
+    recovery: 'This idempotency key was already used for a different email. Use a new key for a new message.',
+  },
   permanent: {
     status: 502,
     code: 'EMAIL_FAILED',
@@ -121,7 +137,12 @@ export function createEmailRouter(options: EmailRouterOptions = {}): Router {
     const mapping = FAILURE_CODES[result.category ?? 'permanent'] ?? FAILURE_CODES.permanent;
     return sendFailure(res, mapping.status, result.message ?? 'Email delivery failed', {
       code: mapping.code,
-      category: result.category === 'quota' ? 'RATE_LIMIT' : 'NETWORK',
+      category:
+        result.category === 'quota'
+          ? 'RATE_LIMIT'
+          : result.category === 'in_progress' || result.category === 'in_doubt' || result.category === 'key_reused'
+            ? 'LIFECYCLE'
+            : 'NETWORK',
       retryable: result.retryable ?? false,
       recoveryAction: mapping.recovery,
       correlationId: req.correlationId,
