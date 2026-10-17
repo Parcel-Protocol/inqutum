@@ -16,10 +16,15 @@
  * deletion or edits are detectable with `verifyReceiptChain`. Receipts can be
  * reviewed after completion or failure; a failed action keeps the redacted error.
  *
+ * Every intent is risk-scored at declaration (see risk-scoring.ts). The signed
+ * assessment travels on the intent and its receipts: a `high` score demands a
+ * second approver, a `critical` score refuses the intent with a signed receipt.
+ *
  * See docs/MAINTAINER-APPROVALS.md.
  */
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import { redactSecrets } from '../domain/partial-failures';
+import { RiskScorer, type RiskAssessment } from './risk-scoring';
 
 export interface HighImpactActionSpec {
   action: string;
@@ -59,6 +64,8 @@ export interface MaintainerIntent {
   createdAt: string;
   expiresAt: string;
   status: IntentStatus;
+  /** Declaration-time assessment, bound into the signature. Null when scoring is disabled. */
+  risk: RiskAssessment | null;
   signature: string;
 }
 
@@ -79,6 +86,7 @@ export interface IntentReceipt {
   result: unknown;
   error: string | null;
   intentSignature: string;
+  risk: RiskAssessment | null;
   issuedAt: string;
   prevReceiptHash: string | null;
   signature: string;
@@ -113,6 +121,8 @@ export interface ApprovalServiceOptions {
   actions?: Record<string, HighImpactActionSpec>;
   /** Called with every receipt (wire to the audit store). Failures are swallowed. */
   onReceipt?: (receipt: IntentReceipt) => void;
+  /** Risk scorer for declared intents. Defaults to one on the same clock; `null` disables scoring. */
+  risk?: RiskScorer | null;
 }
 
 export class MaintainerApprovalService {
@@ -121,6 +131,7 @@ export class MaintainerApprovalService {
   private readonly executors = new Map<string, ActionExecutor>();
   private readonly now: () => Date;
   private readonly actions: Record<string, HighImpactActionSpec>;
+  private readonly risk: RiskScorer | null;
 
   constructor(private readonly options: ApprovalServiceOptions) {
     if (!options.secret || options.secret.length < 16) {
@@ -128,6 +139,7 @@ export class MaintainerApprovalService {
     }
     this.now = options.now ?? (() => new Date());
     this.actions = options.actions ?? HIGH_IMPACT_ACTIONS;
+    this.risk = options.risk === undefined ? new RiskScorer({ now: this.now }) : options.risk;
   }
 
   registerExecutor(action: string, executor: ActionExecutor): void {
@@ -147,6 +159,7 @@ export class MaintainerApprovalService {
     return canonicalJson({
       id: i.id, action: i.action, target: i.target, reason: i.reason,
       requestedBy: i.requestedBy, paramsHash: i.paramsHash, createdAt: i.createdAt, expiresAt: i.expiresAt,
+      risk: i.risk,
     });
   }
 
@@ -195,6 +208,9 @@ export class MaintainerApprovalService {
 
     const params = input.params ?? {};
     const created = this.now();
+    // Score against prior history, then record this attempt so a refused retry still counts.
+    const risk = this.risk?.assess({ action: spec.action, requiresSecondApprover: spec.requiresSecondApprover, requestedBy, target }) ?? null;
+    this.risk?.recordIntent(requestedBy, target);
     const intent: MaintainerIntent = {
       id: randomUUID(),
       action: spec.action,
@@ -208,10 +224,22 @@ export class MaintainerApprovalService {
       createdAt: created.toISOString(),
       expiresAt: new Date(created.getTime() + spec.ttlMs).toISOString(),
       status: 'pending',
+      risk,
       signature: '',
     };
     intent.signature = this.sign(this.intentPayload(intent));
     this.intents.set(intent.id, intent);
+
+    if (risk?.blocked) {
+      intent.status = 'rejected';
+      const codes = risk.factors.map((f) => f.code).join(', ');
+      const receipt = this.issueReceipt(intent, 'rejected', null, null, `Refused by risk policy ${risk.policyVersion}: score ${risk.score} (${codes})`);
+      throw new ApprovalError(
+        'RISK_BLOCKED',
+        `Risk score ${risk.score} (${risk.level}) exceeds policy: ${codes}. Wait ${Math.round(risk.windowMs / 60_000)} min without new attempts and declare again. Receipt ${receipt.id}`,
+        403
+      );
+    }
     return { ...intent };
   }
 
@@ -252,7 +280,8 @@ export class MaintainerApprovalService {
   async execute(id: string, input: { executedBy: string; confirmation: string; params?: Record<string, unknown> }): Promise<IntentReceipt> {
     const intent = this.load(id);
     const spec = this.actions[intent.action];
-    const ready = spec.requiresSecondApprover ? intent.status === 'approved' : intent.status === 'pending' || intent.status === 'approved';
+    const needsSecondApprover = spec.requiresSecondApprover || intent.risk?.requiresSecondApprover === true;
+    const ready = needsSecondApprover ? intent.status === 'approved' : intent.status === 'pending' || intent.status === 'approved';
     if (!ready) {
       throw new ApprovalError(
         intent.status === 'pending' ? 'APPROVAL_REQUIRED' : 'INVALID_STATE',
@@ -303,11 +332,13 @@ export class MaintainerApprovalService {
       result: JSON.parse(JSON.stringify(result ?? null)),
       error,
       intentSignature: intent.signature,
+      risk: intent.risk,
       issuedAt: this.now().toISOString(),
       prevReceiptHash: last ? sha256(canonicalJson(last)) : null,
     };
     const receipt: IntentReceipt = { ...body, signature: this.sign(this.receiptPayload(body)) };
     this.receipts.push(receipt);
+    if (outcome === 'failed' || outcome === 'rejected') this.risk?.recordFailure(intent.requestedBy);
     try {
       this.options.onReceipt?.(receipt);
     } catch {

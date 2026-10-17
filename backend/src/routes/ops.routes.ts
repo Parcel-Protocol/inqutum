@@ -61,7 +61,15 @@ function defaultApprovals(): MaintainerApprovalService | null {
         actor: { type: 'maintainer', id: r.executedBy ?? r.requestedBy },
         scope: { entityType: 'system', entityId: r.target },
         reason: `${r.action}: ${r.outcome}`,
-        metadata: { receiptId: r.id, intentId: r.intentId, outcome: r.outcome, approvedBy: r.approvedBy },
+        metadata: {
+          receiptId: r.id,
+          intentId: r.intentId,
+          outcome: r.outcome,
+          approvedBy: r.approvedBy,
+          riskScore: r.risk?.score ?? null,
+          riskLevel: r.risk?.level ?? null,
+          riskFactors: r.risk?.factors.map((f) => f.code) ?? [],
+        },
       }),
   });
 }

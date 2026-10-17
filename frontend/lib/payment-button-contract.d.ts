@@ -1,3 +1,8 @@
+export declare const WALLET_ERRORS: {
+  readonly NOT_INSTALLED: 'Freighter is not installed';
+  readonly ACCESS_DENIED: 'Freighter access was denied';
+};
+
 export interface PaymentValidationSuccess {
   ok: true;
   payer: {

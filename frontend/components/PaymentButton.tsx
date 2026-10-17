@@ -8,6 +8,7 @@ import { invoiceApi } from '@/lib/api';
 import { showFreighterInstallPrompt } from '@/components/FreighterInstallPrompt';
 import { describeVerifyError } from '@/lib/payment-page-state';
 import {
+  WALLET_ERRORS,
   validatePaymentRequest,
   classifyPaymentError,
 } from '@/lib/payment-button-contract';
@@ -80,7 +81,7 @@ export default function PaymentButton({
         toast.info('Non-Freighter wallet? Use the QR code or manual payment details below.', {
           duration: 8000,
         });
-        onError?.('Freighter is not installed');
+        onError?.(WALLET_ERRORS.NOT_INSTALLED);
         return;
       }
 
@@ -91,8 +92,8 @@ export default function PaymentButton({
         allowed = false;
       }
       if (!allowed) {
-        toast.error('Freighter access was denied');
-        onError?.('Freighter access was denied');
+        toast.error(WALLET_ERRORS.ACCESS_DENIED);
+        onError?.(WALLET_ERRORS.ACCESS_DENIED);
         return;
       }
 
@@ -142,19 +143,22 @@ export default function PaymentButton({
     <button
       type="button"
       onClick={handlePayment}
-      disabled={loading || !destination || !amount || invoiceStatus !== 'PENDING'}
+      // While a payment is in flight the button stays focusable (aria-disabled, guarded in
+      // handlePayment); `disabled` makes some browsers (Chromium) move focus to <body>.
+      disabled={!destination || !amount || invoiceStatus !== 'PENDING'}
+      aria-disabled={loading}
       aria-busy={loading}
       data-payment-state={loading ? 'processing' : 'ready'}
       className="btn btn-primary w-full flex items-center justify-center gap-2 text-lg py-4"
     >
       {loading ? (
         <>
-          <Loader2 className="w-6 h-6 animate-spin" />
+          <Loader2 className="w-6 h-6 animate-spin" aria-hidden="true" />
           Processing...
         </>
       ) : (
         <>
-          <Wallet className="w-6 h-6" />
+          <Wallet className="w-6 h-6" aria-hidden="true" />
           Pay with Freighter
         </>
       )}

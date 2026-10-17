@@ -3,6 +3,7 @@
 import { FileText, Mail } from 'lucide-react';
 import PaymentReceipt from './PaymentReceipt';
 import type { PayPageInvoice } from './pay-page.types';
+import { PAY_FOCUS_IDS } from '@/lib/pay-status-a11y';
 
 interface PayProofPanelProps {
   invoice: PayPageInvoice;
@@ -12,7 +13,8 @@ interface PayProofPanelProps {
 
 export default function PayProofPanel({ invoice, onDownload, onEmail }: PayProofPanelProps) {
   return (
-    <section aria-label="Payment proof" className="space-y-4">
+    // tabIndex -1: receives focus programmatically when a payment settles and the pay controls unmount.
+    <section id={PAY_FOCUS_IDS.proof} tabIndex={-1} aria-label="Payment proof" className="space-y-4">
       <PaymentReceipt invoice={invoice} />
       <div className="card flex gap-2 print:hidden">
         <button type="button" onClick={onDownload} className="btn btn-primary flex-1 flex items-center justify-center gap-2 focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" aria-label="Download Payment Proof PDF" aria-haspopup="dialog">

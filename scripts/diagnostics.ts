@@ -1,13 +1,164 @@
 import fs from 'fs';
 import path from 'path';
 import { validateEnvironment } from '../backend/src/config/env-validator';
+import { isAllowedProbeUrl, probeJson, type ProbeOptions } from './http-probe';
 
 export interface DiagnosticCheckResult {
   name: string;
-  category: 'runtime' | 'config' | 'storage' | 'network' | 'fixtures';
+  category: 'runtime' | 'config' | 'storage' | 'network' | 'fixtures' | 'dependencies' | 'authorization';
   status: 'PASS' | 'WARN' | 'FAIL';
   message: string;
   remediation?: string;
+}
+
+export interface DiagnosticsOptions {
+  rootDir?: string;
+  /** Probe Horizon over the network (opt-in: `--network`). */
+  network?: boolean;
+  probe?: ProbeOptions;
+}
+
+/** Network passphrases from https://developers.stellar.org/docs/networks (pinned to the SDK in tests). */
+export const STELLAR_NETWORK_PASSPHRASES: Record<'TESTNET' | 'PUBLIC', string> = {
+  TESTNET: 'Test SDF Network ; September 2015',
+  PUBLIC: 'Public Global Stellar Network ; September 2015',
+};
+
+/** Shortest admin secret accepted; MaintainerApprovalService refuses anything shorter. */
+const MIN_ADMIN_SECRET_LENGTH = 16;
+const WORKSPACES = ['backend', 'frontend'] as const;
+const MAX_LISTED = 8;
+
+const listNames = (names: string[]) =>
+  names.length > MAX_LISTED ? `${names.slice(0, MAX_LISTED).join(', ')} (+${names.length - MAX_LISTED} more)` : names.join(', ');
+
+const readJson = (file: string): any | null => {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+};
+
+/** Names whose declared range differs between two dependency maps. */
+function driftedNames(declared: Record<string, string> = {}, locked: Record<string, string> = {}): string[] {
+  return Object.keys({ ...declared, ...locked }).filter((name) => declared[name] !== locked[name]).sort();
+}
+
+/**
+ * Validates one workspace's dependency state without running npm. O(D) file reads.
+ *
+ *  - lockfile missing or out of sync with package.json -> FAIL (`npm ci` refuses both)
+ *  - packages not installed, or installed at a version other than the lockfile's -> WARN
+ */
+export function checkWorkspaceDependencies(rootDir: string, workspace: string): DiagnosticCheckResult {
+  const dir = path.join(rootDir, workspace);
+  const name = `Dependencies: ${workspace}`;
+  const manifest = readJson(path.join(dir, 'package.json'));
+  if (!manifest) {
+    return { name, category: 'dependencies', status: 'FAIL', message: `${workspace}/package.json is missing or unreadable.`, remediation: 'Restore the file from git: git checkout -- ' + `${workspace}/package.json` };
+  }
+
+  const lock = readJson(path.join(dir, 'package-lock.json'));
+  const lockRoot = lock?.packages?.[''];
+  if (!lockRoot) {
+    return { name, category: 'dependencies', status: 'FAIL', message: `${workspace}/package-lock.json is missing or has no root entry; npm ci cannot install.`, remediation: `Restore it from git, or run npm install in ${workspace}/ and commit the lockfile.` };
+  }
+
+  const drift = [
+    ...driftedNames(manifest.dependencies, lockRoot.dependencies),
+    ...driftedNames(manifest.devDependencies, lockRoot.devDependencies),
+  ];
+  if (drift.length > 0) {
+    return { name, category: 'dependencies', status: 'FAIL', message: `package.json and package-lock.json disagree on: ${listNames(drift)}. npm ci exits with an error in this state.`, remediation: `Run npm install in ${workspace}/ and commit the updated package-lock.json.` };
+  }
+
+  const declared = Object.keys({ ...manifest.dependencies, ...manifest.devDependencies });
+  const missing: string[] = [];
+  const stale: string[] = [];
+  for (const dep of declared) {
+    const installed = readJson(path.join(dir, 'node_modules', dep, 'package.json'));
+    if (!installed) missing.push(dep);
+    else if (installed.version !== lock.packages[`node_modules/${dep}`]?.version) stale.push(dep);
+  }
+
+  if (missing.length > 0 || stale.length > 0) {
+    const parts = [
+      missing.length > 0 ? `${missing.length} not installed (${listNames(missing)})` : '',
+      stale.length > 0 ? `${stale.length} differ from the lockfile (${listNames(stale)})` : '',
+    ].filter(Boolean);
+    return { name, category: 'dependencies', status: 'WARN', message: `Lockfile is in sync, but ${parts.join('; ')}.`, remediation: `Run npm ci in ${workspace}/ (safe to re-run; it reinstalls exactly what the lockfile pins).` };
+  }
+
+  return { name, category: 'dependencies', status: 'PASS', message: `Lockfile in sync and all ${declared.length} declared packages installed at locked versions.` };
+}
+
+/**
+ * Admin routes are guarded by JOBS_ADMIN_TOKEN; high-impact intents additionally need
+ * MAINTAINER_INTENT_SECRET, which the server silently ignores when it is too short.
+ * Values are never echoed — only whether each is set and long enough.
+ */
+export function checkAdminAuthorization(env: Record<string, string | undefined>): DiagnosticCheckResult {
+  const adminToken = env.JOBS_ADMIN_TOKEN?.trim() ?? '';
+  const intentSecret = env.MAINTAINER_INTENT_SECRET?.trim() ?? '';
+  const issues: string[] = [];
+
+  if (adminToken && adminToken.length < MIN_ADMIN_SECRET_LENGTH) issues.push(`JOBS_ADMIN_TOKEN is shorter than ${MIN_ADMIN_SECRET_LENGTH} characters`);
+  if (intentSecret && intentSecret.length < MIN_ADMIN_SECRET_LENGTH) issues.push(`MAINTAINER_INTENT_SECRET is shorter than ${MIN_ADMIN_SECRET_LENGTH} characters, so maintainer approvals stay disabled`);
+  if (intentSecret && !adminToken) issues.push('MAINTAINER_INTENT_SECRET is set but JOBS_ADMIN_TOKEN is not, so the /ops/intents routes are unreachable');
+
+  const name = 'Admin Authorization Secrets';
+  if (issues.length > 0) {
+    return {
+      name,
+      category: 'authorization',
+      status: env.NODE_ENV === 'production' ? 'FAIL' : 'WARN',
+      message: issues.join('; ') + '.',
+      remediation: `Generate secrets of at least ${MIN_ADMIN_SECRET_LENGTH} characters (e.g. openssl rand -hex 32) and set both in backend/.env.`,
+    };
+  }
+  const state = (value: string) => (value ? 'configured' : 'not set (routes return 403)');
+  return { name, category: 'authorization', status: 'PASS', message: `JOBS_ADMIN_TOKEN ${state(adminToken)}; MAINTAINER_INTENT_SECRET ${state(intentSecret)}.` };
+}
+
+/** Confirms Horizon is reachable and serves the configured network. Retries transient failures. */
+export async function checkHorizonNetwork(
+  horizonUrl: string,
+  network: 'TESTNET' | 'PUBLIC',
+  production: boolean,
+  probe?: ProbeOptions
+): Promise<DiagnosticCheckResult> {
+  const name = 'Stellar Horizon Reachability';
+  if (!isAllowedProbeUrl(horizonUrl)) {
+    return { name, category: 'network', status: 'WARN', message: `Skipped probe: ${horizonUrl} is not HTTPS or loopback.`, remediation: 'Use an https:// Horizon endpoint.' };
+  }
+
+  const result = await probeJson(horizonUrl, probe);
+  if (!result.ok) {
+    if (result.reason === 'unauthorized') {
+      return { name, category: 'network', status: 'FAIL', message: `Horizon rejected the request (HTTP ${result.status}).`, remediation: 'Your Horizon provider requires credentials; use a provider URL that embeds or accepts your API key, or the public SDF endpoint.' };
+    }
+    return {
+      name,
+      category: 'network',
+      status: production ? 'FAIL' : 'WARN',
+      message: `Horizon not reachable after ${result.attempts} attempt(s): ${result.message}`,
+      remediation: 'Check connectivity, proxies and STELLAR_HORIZON_URL. Offline work is still possible with NEXT_PUBLIC_USE_MOCK=true; re-run with --network when back online.',
+    };
+  }
+
+  const served = result.body?.network_passphrase;
+  const expected = STELLAR_NETWORK_PASSPHRASES[network];
+  if (served !== expected) {
+    return {
+      name,
+      category: 'network',
+      status: 'FAIL',
+      message: `Horizon serves "${String(served)}" but STELLAR_NETWORK=${network} expects "${expected}". Payments would be verified against the wrong network.`,
+      remediation: 'Point STELLAR_HORIZON_URL at a Horizon for the configured network, or correct STELLAR_NETWORK.',
+    };
+  }
+  return { name, category: 'network', status: 'PASS', message: `Horizon serves ${network} (protocol ${result.body?.current_protocol_version ?? 'unknown'}), reachable after ${result.attempts} attempt(s).` };
 }
 
 export interface DiagnosticsSummary {
@@ -19,7 +170,10 @@ export interface DiagnosticsSummary {
   results: DiagnosticCheckResult[];
 }
 
-export async function runDiagnostics(env: Record<string, string | undefined> = process.env): Promise<DiagnosticsSummary> {
+export async function runDiagnostics(
+  env: Record<string, string | undefined> = process.env,
+  options: DiagnosticsOptions = {}
+): Promise<DiagnosticsSummary> {
   const results: DiagnosticCheckResult[] = [];
 
   // 1. Node.js runtime version check
@@ -43,7 +197,7 @@ export async function runDiagnostics(env: Record<string, string | undefined> = p
   }
 
   // 2. Project structure and fixture presence
-  const rootDir = path.resolve(__dirname, '..');
+  const rootDir = options.rootDir ?? path.resolve(__dirname, '..');
   const criticalPaths = [
     { rel: 'backend/src/server-mvp.ts', desc: 'Backend MVP server' },
     { rel: 'backend/src/storage/memory-invoice-storage.ts', desc: 'In-memory storage layer' },
@@ -137,6 +291,18 @@ export async function runDiagnostics(env: Record<string, string | undefined> = p
     });
   }
 
+  // 6. Dependency state per workspace
+  for (const workspace of WORKSPACES) results.push(checkWorkspaceDependencies(rootDir, workspace));
+
+  // 7. Admin authorization secrets
+  results.push(checkAdminAuthorization(env));
+
+  // 8. Live Horizon probe (opt-in, so the default run stays offline and read-only)
+  if (options.network) {
+    const network = stellarNetwork === 'PUBLIC' ? 'PUBLIC' : 'TESTNET';
+    results.push(await checkHorizonNetwork(horizonUrl, network, env.NODE_ENV === 'production', options.probe));
+  }
+
   const passed = results.filter((r) => r.status === 'PASS').length;
   const warnings = results.filter((r) => r.status === 'WARN').length;
   const failures = results.filter((r) => r.status === 'FAIL').length;
@@ -182,7 +348,7 @@ export function formatDiagnosticsOutput(summary: DiagnosticsSummary): string {
 
 // CLI entrypoint
 if (require.main === module || process.argv[1]?.endsWith('diagnostics.ts')) {
-  runDiagnostics().then((summary) => {
+  runDiagnostics(process.env, { network: process.argv.includes('--network') }).then((summary) => {
     console.log(formatDiagnosticsOutput(summary));
     process.exit(summary.failures > 0 ? 1 : 0);
   });

@@ -9,6 +9,7 @@ import PayMemoBlock from '@/components/PayMemoBlock';
 import PayVerifyPanel from '@/components/PayVerifyPanel';
 import PayProofPanel from '@/components/PayProofPanel';
 import PayMonitorPanel from '@/components/PayMonitorPanel';
+import PayStatusRegion from '@/components/PayStatusRegion';
 import QRCodeDisplay from '@/components/QRCodeDisplay';
 import PaymentButton from '@/components/PaymentButton';
 import WalletConnect from '@/components/WalletConnect';
@@ -70,6 +71,7 @@ export default function PaymentPage() {
         onDisconnect={() => page.setWallet(null)}
       />
       <div className="max-w-4xl mx-auto relative z-10 pt-20">
+        <PayStatusRegion state={page.paymentState} />
         {page.loadError && (
           <div className="mb-6">
             <ApiErrorState message={page.loadError} onRetry={() => void page.reload()} compact />
@@ -162,8 +164,9 @@ export default function PaymentPage() {
                 <PayVerifyPanel
                   txHash={page.txHash}
                   verifying={page.verifying}
+                  error={page.verifyError}
                   onChange={page.setTxHash}
-                  onVerify={() => void page.verify()}
+                  onVerify={page.verify}
                 />
               </>
             )}

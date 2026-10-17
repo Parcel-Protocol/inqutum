@@ -1,5 +1,11 @@
 const { normalizePayerDetails, describeVerifyError } = require('./payment-page-state');
 
+/** Wallet authorization outcomes; shared with the pay-page announcements. */
+const WALLET_ERRORS = Object.freeze({
+  NOT_INSTALLED: 'Freighter is not installed',
+  ACCESS_DENIED: 'Freighter access was denied',
+});
+
 /**
  * Validates parameters for PaymentButton before initiating wallet interaction.
  *
@@ -121,7 +127,7 @@ async function executePaymentContract(deps, params) {
 
   if (!freighterInstalled) {
     deps.showFreighterInstallPrompt?.();
-    const msg = 'Freighter is not installed';
+    const msg = WALLET_ERRORS.NOT_INSTALLED;
     deps.onError?.(msg);
     return { success: false, error: msg };
   }
@@ -134,7 +140,7 @@ async function executePaymentContract(deps, params) {
   }
 
   if (!allowed) {
-    const msg = 'Freighter access was denied';
+    const msg = WALLET_ERRORS.ACCESS_DENIED;
     deps.toast?.error?.(msg);
     deps.onError?.(msg);
     return { success: false, error: msg };
@@ -192,6 +198,7 @@ async function executePaymentContract(deps, params) {
 }
 
 module.exports = {
+  WALLET_ERRORS,
   validatePaymentRequest,
   classifyPaymentError,
   executePaymentContract,
