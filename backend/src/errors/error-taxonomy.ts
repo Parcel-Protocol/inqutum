@@ -169,6 +169,22 @@ export const DOMAIN_ERROR_TAXONOMY: Record<string, DomainErrorDefinition> = {
     userSafeMessage: 'sellerPublicKey query parameter is required',
     recoveryAction: 'Connect your Freighter wallet to supply the seller public key.',
   },
+  INVALID_STATUS: {
+    code: 'INVALID_STATUS',
+    category: 'VALIDATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'status filter is not a known invoice status',
+    recoveryAction: 'Filter by PENDING, PAID, EXPIRED or CANCELLED, or omit status to list every invoice.',
+  },
+  INVALID_CURSOR: {
+    code: 'INVALID_CURSOR',
+    category: 'VALIDATION',
+    httpStatus: 400,
+    retryable: false,
+    userSafeMessage: 'cursor is not valid; restart from the first page',
+    recoveryAction: 'Drop the cursor and request the first page again.',
+  },
   UNAUTHORIZED_SELLER: {
     code: 'UNAUTHORIZED_SELLER',
     category: 'AUTHORIZATION',

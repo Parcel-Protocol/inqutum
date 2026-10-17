@@ -5,6 +5,9 @@ In financial infrastructure, committing sudden business policy changes (such as 
 
 The **Policy Simulation Preview** engine (Issue #267) allows maintainers to dry-run proposed business policy changes against live pending and stored invoice state prior to deployment.
 
+> For validated proposals, expiry rules and bounded, paginated previews on large
+> datasets, use the dry-run evaluator: [POLICY_DRY_RUN.md](POLICY_DRY_RUN.md).
+
 ## Simulation Capabilities
 
 1. **Affected Records Preview**: Identifies specific stored invoices that were compliant under the current policy but would become non-compliant under the proposed policy.

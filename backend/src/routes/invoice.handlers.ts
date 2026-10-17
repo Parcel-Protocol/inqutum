@@ -28,12 +28,21 @@ import { classifyError } from '../errors/error-taxonomy';
 import { ConflictError } from '../concurrency/optimistic-lock';
 import { invoiceLockManager } from '../concurrency/lock-manager';
 import { safeFrontendOrigin } from '../security/content-safety';
+import {
+  CheckpointInDoubtError,
+  CheckpointInProgressError,
+  CheckpointKeyReusedError,
+} from '../recovery/side-effect-checkpoint';
 import { NotificationService, notificationService } from '../notifications/notification-service';
 import { EmailService, emailService, EmailTemplateType } from '../services/email.service';
 import type { VerificationCode } from '../services/payment-verification';
 
 /** Kept explicit so clients can tune polling without duplicating backend policy. */
 export const PAYMENT_STATUS_POLL_INTERVAL_MS = 3000;
+
+/** Invoice list page size bounds; the effective value is echoed in `pagination.limit`. */
+export const DEFAULT_INVOICE_PAGE_LIMIT = 50;
+export const MAX_INVOICE_PAGE_LIMIT = 200;
 
 /** Only the part of the Stellar service the verify handler needs. */
 export interface TransactionLookup {
@@ -342,7 +351,11 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           return sendFailure(res, 400, invalid.message, { code: invalid.code, correlationId: corrId });
         }
 
-        const limit = toPositiveInt(req.query.limit, 50);
+        // Clamped so a page is never empty-but-"hasMore" (limit=0) or unbounded.
+        const limit = Math.min(
+          Math.max(toPositiveInt(req.query.limit, DEFAULT_INVOICE_PAGE_LIMIT), 1),
+          MAX_INVOICE_PAGE_LIMIT
+        );
         // A cursor fully positions the page; offset only applies to legacy offset paging.
         const offset = after ? 0 : toPositiveInt(req.query.offset, 0);
 
@@ -1134,9 +1147,19 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           });
         }
 
+        // Optional retry key (#289); bounded so the checkpoint key fits its column.
+        const idempotencyKey = req.headers?.['idempotency-key'];
+        if (idempotencyKey !== undefined && (typeof idempotencyKey !== 'string' || !idempotencyKey || idempotencyKey.length > 200)) {
+          return sendFailure(res, 400, 'Idempotency-Key must be 1-200 characters', {
+            code: 'INVALID_IDEMPOTENCY_KEY',
+            correlationId: corrId,
+          });
+        }
+
         const result = await emails.sendInvoiceEmail(invoice, templateType, {
           frontendUrl: frontendUrl(),
           recipientEmail,
+          idempotencyKey,
         });
 
         // Record audit trail event for sent email
@@ -1186,6 +1209,22 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           sentAt: new Date().toISOString(),
         });
       } catch (error: any) {
+        if (error instanceof CheckpointKeyReusedError) {
+          return sendFailure(res, 422, error.message, {
+            code: 'IDEMPOTENCY_KEY_REUSED',
+            category: 'VALIDATION',
+            retryable: false,
+            correlationId: corrId,
+          });
+        }
+        if (error instanceof CheckpointInProgressError || error instanceof CheckpointInDoubtError) {
+          return sendFailure(res, 409, error.message, {
+            code: error instanceof CheckpointInDoubtError ? 'EMAIL_OUTCOME_IN_DOUBT' : 'EMAIL_SEND_IN_PROGRESS',
+            category: 'LIFECYCLE',
+            retryable: error instanceof CheckpointInProgressError,
+            correlationId: corrId,
+          });
+        }
         logError('Send invoice email error:', error);
         sendFailure(res, 500, error.message || 'Failed to send invoice email', {
           correlationId: corrId,

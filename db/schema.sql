@@ -88,6 +88,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency_key ON jobs(idempotency_k
 CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(run_at) WHERE status IN ('queued', 'running');
 CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs(status, created_at DESC);
 
+-- Recovery checkpoints around external side effects (#289, docs/RECOVERY_CHECKPOINTS.md).
+-- One row per idempotency key: intent is written before the call, outcome after.
+CREATE TABLE IF NOT EXISTS side_effect_checkpoints (
+  key VARCHAR(255) PRIMARY KEY,
+  effect VARCHAR(100) NOT NULL,
+  -- SHA-256 of the request payload: a key reused for another payload is refused.
+  fingerprint VARCHAR(64),
+  state VARCHAR(20) NOT NULL
+    CHECK (state IN ('started', 'succeeded', 'failed', 'in_doubt')),
+  attempt INTEGER NOT NULL DEFAULT 1,
+  result JSONB,
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_side_effect_checkpoints_open
+  ON side_effect_checkpoints(updated_at) WHERE state IN ('started', 'in_doubt');
+
 -- Wallet alignment: databases created before wallet-scoped sellers still have
 -- the unused users table and invoices.user_id column. Both are dropped here so
 -- re-running the migration converges on the wallet-only schema.

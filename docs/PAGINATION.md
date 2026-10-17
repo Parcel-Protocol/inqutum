@@ -12,7 +12,7 @@ same ordering, via `backend/src/storage/invoice-cursor.ts`.
 |-------|---------|
 | `sellerPublicKey` | Required. Only this wallet's invoices are ever returned. |
 | `status` | Optional, case-insensitive: `PENDING`, `PAID`, `EXPIRED`, `CANCELLED`. Anything else returns `400 INVALID_STATUS`. |
-| `limit` | Page size, default 50. |
+| `limit` | Page size, default 50, clamped to 1–200. Non-numeric or negative values use the default. The effective value is echoed in `pagination.limit`. |
 | `cursor` | `pagination.nextCursor` from the previous response. When present, `offset` is ignored. |
 | `offset` | Legacy. Kept for old clients but **unstable**: see below. |
 
@@ -23,9 +23,18 @@ Response `pagination`:
 ```
 
 `total` is the number of rows on this page. `nextCursor` is `null` on the last
-page. Cursors are opaque (base64url of `createdAt|id`). A malformed or edited
-cursor returns `400 INVALID_CURSOR`, and the client should restart from the
-first page. Cursor payloads are strictly validated: bounded to 512 characters,
+page, and `hasMore` is always `nextCursor !== null`. Cursors are opaque
+(base64url of `createdAt|id`). A malformed or edited cursor returns
+`400 INVALID_CURSOR` (`category: VALIDATION`, `retryable: false`), and the client
+should restart from the first page. An unknown `status` returns
+`400 INVALID_STATUS` with the same classification.
+
+**Limit bounds (migration note).** Before this bound, `limit=0` returned an
+empty page with `hasMore: true` and no cursor, and `limit` had no upper bound.
+Clients that ask for more than 200 now get 200 rows, with `hasMore` and
+`nextCursor` set. Cursor clients need no change. Legacy offset clients must
+advance `offset` by the number of rows returned (or `pagination.limit`), not by
+the limit they requested. The dashboard requests 50 and is unaffected. Cursor payloads are strictly validated: bounded to 512 characters,
 restricted to standard base64url characters, validated for strict ISO-8601
 millisecond timestamp round-tripping and valid UUID format.
 
@@ -68,5 +77,6 @@ any in-flight page.
 cd backend
 npm test                                    # cursor suite runs on both backends (fake Postgres)
 node --import tsx --test tests/invoice-cursor.test.ts # cursor encode/decode & edge-case contract tests
+node --import tsx --test tests/pagination-authorization-contract.test.ts # HTTP contract: paging, filters, wallet scope, admin boundary
 DATABASE_URL=postgres://… npm run test:pg   # same-millisecond ties + inserts on real Postgres
 ```

@@ -15,6 +15,10 @@ and switched off without shipping code. Definitions live in
   The client never sends or sees a flag that changes what it is allowed to do.
 - Flags are read from the environment on every check. Changing one needs a
   process restart (`render.yaml` / Vercel env), not a rebuild.
+- A maintainer can also override a flag at runtime, without a restart, through
+  `PUT /api/ops/config/feature-flags/:flag`. The override needs a capability
+  token and is audited (see [ADMIN_CONFIG_AUDIT.md](ADMIN_CONFIG_AUDIT.md)). It
+  is process-local and lost on restart. The environment stays the durable value.
 - `GET /api/health` reports the effective state under `features`.
 - When a rollout is finished, delete the flag and the losing code path.
 
@@ -39,6 +43,10 @@ and switched off without shipping code. Definitions live in
    `AMOUNT_MISMATCH` and paid-invoice counts for a day.
 
 ## Emergency rollback
+
+Without a restart: mint a `config.feature_flag.set` capability and send
+`{"enabled": false, …}` to `PUT /api/ops/config/feature-flags/paymentAmountTolerance`
+([ADMIN_CONFIG_AUDIT.md](ADMIN_CONFIG_AUDIT.md)). Then make it durable:
 
 Set `FEATURE_PAYMENT_AMOUNT_TOLERANCE=false`, or delete the variable, and
 restart the service. Confirm `features.paymentAmountTolerance` is `false` on

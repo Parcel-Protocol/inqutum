@@ -13,6 +13,8 @@ import { createOpsRouter } from './ops.routes';
 import { createWebhookRouter } from './webhook.routes';
 import { PostgresJobStore } from '../jobs/postgres-job-store';
 import { pool } from '../config/database';
+import { EmailDeliveryService } from '../notifications/email-delivery';
+import { PostgresCheckpointStore } from '../recovery/side-effect-checkpoint';
 import { healthHandler, readinessHandler } from '../health';
 
 const router: Router = Router();
@@ -26,7 +28,8 @@ router.use(createInvoiceRouter({ storage: postgresInvoiceStorage }));
 router.use(createAuditRouter({ storage: postgresInvoiceStorage }));
 router.use(createObservabilityRouter({ storage: postgresInvoiceStorage }));
 router.use(createNotificationRouter());
-router.use(createEmailRouter());
+// Keyed sends are checkpointed in Postgres so a crash mid-send is detected after restart (#289).
+router.use(createEmailRouter({ service: new EmailDeliveryService({ checkpoints: new PostgresCheckpointStore(pool) }) }));
 router.use(createExportRouter({ storage: postgresInvoiceStorage }));
 
 const jobStore = new PostgresJobStore(pool);

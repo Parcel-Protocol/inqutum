@@ -12,7 +12,10 @@ import {
 } from '../audit/impersonation';
 import { stellarPublicKeySchema } from '../utils/validation';
 import { simulatePolicyChange } from '../domain/policy-simulation';
+import { evaluatePolicyDryRun, parsePolicyDryRunRequest, PolicyDryRunError } from '../domain/policy-dry-run';
 import { loadPolicy } from '../domain/policy';
+import { CapabilityError, CapabilityTokenService, capabilityServiceFromEnv } from '../security/capability-tokens';
+import { AdminConfigError, AdminConfigService, adminConfig } from '../config/admin-config';
 import { staleProjectionService } from '../ops/stale-projections.service';
 import { defaultSearchIndex } from '../services/search-index.service';
 import { SyntheticJourneyMonitor } from '../ops/synthetic-journey-monitor';
@@ -33,6 +36,12 @@ import {
 import { jobsToOperations } from '../domain/partial-failures';
 import { ApprovalError, MaintainerApprovalService, type IntentStatus, type ReceiptOutcome } from '../ops/maintainer-approval';
 import { auditStore } from '../audit/audit-service';
+import {
+  NothingToRollBackError,
+  ProjectionReplayService,
+  ReplayInProgressError,
+  UnknownProjectorVersionError,
+} from '../ops/projection-replay';
 
 export interface OpsRouterOptions {
   storage: InvoiceStorage;
@@ -48,6 +57,15 @@ export interface OpsRouterOptions {
    * MAINTAINER_INTENT_SECRET; when that is unset the intent routes return 403.
    */
   approvals?: MaintainerApprovalService | null;
+  /**
+   * Capability tokens for sensitive actions. Defaults to one keyed by
+   * CAPABILITY_TOKEN_SECRET; when that is unset the capability routes return 403.
+   */
+  capabilities?: CapabilityTokenService | null;
+  /** Audited runtime configuration. Defaults to the process instance. */
+  adminConfig?: AdminConfigService;
+  /** Search-index event replay (#290). Defaults to the live index and audit trail. */
+  replay?: ProjectionReplayService;
 }
 
 function defaultApprovals(): MaintainerApprovalService | null {
@@ -93,6 +111,15 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
   const admin = requireAdmin(options.adminToken);
   const approvals = options.approvals === undefined ? defaultApprovals() : options.approvals;
   const retries = options.jobs ? new PartialFailureRetryCoordinator(options.jobs) : null;
+  const capabilities = options.capabilities === undefined ? capabilityServiceFromEnv() : options.capabilities;
+  const config = options.adminConfig ?? adminConfig;
+  const replay =
+    options.replay ??
+    new ProjectionReplayService({
+      storage: options.storage,
+      index: defaultSearchIndex,
+      events: () => auditStore.listChronological(),
+    });
 
   if (approvals && options.jobs) {
     const jobs = options.jobs;
@@ -184,8 +211,14 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
 
   const needApprovals = (req: any, res: any, next: any) =>
     approvals ? next() : fail(res, req, 403, 'APPROVALS_DISABLED', 'Set MAINTAINER_INTENT_SECRET to enable high-impact actions');
-  const approvalError = (req: any, res: any, err: unknown, next: any) =>
-    err instanceof ApprovalError ? fail(res, req, err.httpStatus, err.code, err.message) : next(err);
+  /** Typed domain errors carry their own status and code; anything else is a 500. */
+  const knownError = (req: any, res: any, err: unknown, next: any) =>
+    err instanceof ApprovalError ||
+    err instanceof CapabilityError ||
+    err instanceof AdminConfigError ||
+    err instanceof PolicyDryRunError
+      ? fail(res, req, err.httpStatus, err.code, err.message)
+      : next(err);
 
   router.post('/ops/intents', admin, needApprovals, (req, res, next) => {
     try {
@@ -198,7 +231,7 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
       });
       res.status(201).json({ success: true, data: intent, correlationId: req.correlationId });
     } catch (err) {
-      approvalError(req, res, err, next);
+      knownError(req, res, err, next);
     }
   });
 
@@ -211,7 +244,7 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
     try {
       res.json({ success: true, data: approvals!.approve(req.params.id, String(req.body?.approverId ?? '')), correlationId: req.correlationId });
     } catch (err) {
-      approvalError(req, res, err, next);
+      knownError(req, res, err, next);
     }
   });
 
@@ -219,7 +252,7 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
     try {
       res.json({ success: true, data: approvals!.reject(req.params.id, String(req.body?.maintainerId ?? ''), String(req.body?.reason ?? '')), correlationId: req.correlationId });
     } catch (err) {
-      approvalError(req, res, err, next);
+      knownError(req, res, err, next);
     }
   });
 
@@ -232,7 +265,7 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
       });
       res.status(receipt.outcome === 'succeeded' ? 200 : 502).json({ success: receipt.outcome === 'succeeded', data: receipt, correlationId: req.correlationId });
     } catch (err) {
-      approvalError(req, res, err, next);
+      knownError(req, res, err, next);
     }
   });
 
@@ -277,6 +310,95 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
     }
   });
 
+  // Dry-run policy evaluation with paginated affected-record previews (#296).
+  // Validation runs before any record is read; a storage that cannot enumerate
+  // invoices fails closed rather than reporting an empty impact.
+  router.post('/ops/policy/dry-run', admin, async (req, res, next) => {
+    try {
+      const request = parsePolicyDryRunRequest(req.body, loadPolicy());
+      if (!options.storage.getAllInvoices) {
+        return fail(res, req, 503, 'DRY_RUN_UNAVAILABLE', 'Storage cannot enumerate invoices, so impact cannot be evaluated');
+      }
+      const invoices = await options.storage.getAllInvoices();
+      res.json({ success: true, data: evaluatePolicyDryRun(invoices, request), correlationId: req.correlationId });
+    } catch (err) {
+      knownError(req, res, err, next);
+    }
+  });
+
+  // -- Capability tokens for sensitive actions (#285) ------------------------
+
+  const needCapabilities = (req: any, res: any, next: any) =>
+    capabilities
+      ? next()
+      : fail(res, req, 403, 'CAPABILITIES_DISABLED', 'Set CAPABILITY_TOKEN_SECRET (32+ characters) to enable sensitive admin actions');
+
+  router.post('/ops/capabilities', admin, needCapabilities, (req, res, next) => {
+    try {
+      const ttlSeconds = req.body?.ttlSeconds;
+      const { token, claims } = capabilities!.issue({
+        action: String(req.body?.action ?? ''),
+        target: String(req.body?.target ?? ''),
+        subject: String(req.body?.subject ?? ''),
+        ttlMs: ttlSeconds === undefined ? undefined : Number(ttlSeconds) * 1000,
+      });
+      // Recorded before the token is returned: no capability exists without evidence.
+      auditStore.recordEvent({
+        action: 'CAPABILITY_ISSUED',
+        actor: { type: 'maintainer', id: claims.subject, ip: req.ip, userAgent: req.get('user-agent') },
+        scope: { entityType: 'system', entityId: claims.target },
+        reason: `Capability issued for ${claims.action}`,
+        metadata: { capabilityId: claims.id, action: claims.action, expiresAt: new Date(claims.exp).toISOString() },
+        correlationId: req.correlationId,
+      });
+      res.status(201).json({
+        success: true,
+        data: {
+          token,
+          capabilityId: claims.id,
+          action: claims.action,
+          target: claims.target,
+          subject: claims.subject,
+          issuedAt: new Date(claims.iat).toISOString(),
+          expiresAt: new Date(claims.exp).toISOString(),
+        },
+        correlationId: req.correlationId,
+      });
+    } catch (err) {
+      knownError(req, res, err, next);
+    }
+  });
+
+  // -- Audited runtime configuration (#292) ----------------------------------
+
+  router.get('/ops/config', admin, (req, res) => {
+    res.json({ success: true, data: config.snapshot(), correlationId: req.correlationId });
+  });
+
+  router.put('/ops/config/feature-flags/:flag', admin, needCapabilities, async (req, res, next) => {
+    try {
+      const result = await capabilities!.use(
+        req.header('x-capability-token'),
+        { action: 'config.feature_flag.set', target: req.params.flag },
+        (claims) =>
+          config.setFeatureFlag({
+            flag: req.params.flag,
+            enabled: req.body?.enabled,
+            reason: req.body?.reason,
+            expectedVersion: req.body?.expectedVersion,
+            actorId: claims.subject,
+            capabilityId: claims.id,
+            correlationId: req.correlationId,
+            ip: req.ip,
+            userAgent: req.get('user-agent'),
+          })
+      );
+      res.json({ success: true, data: result, correlationId: req.correlationId });
+    } catch (err) {
+      knownError(req, res, err, next);
+    }
+  });
+
   // Stale projection detection and repair recommendations (Issue #269)
   router.get('/ops/stale-projections/detect', admin, async (req, res, next) => {
     try {
@@ -294,6 +416,60 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
       res.json({ success: true, data: evidence, correlationId: req.correlationId });
     } catch (err) {
       next(err);
+    }
+  });
+
+  // Versioned event replay for the search-index projection (#290). Dry run by default.
+  router.post('/ops/projections/search-index/replay', admin, async (req, res, next) => {
+    const dryRun = req.body?.dryRun !== false;
+    const version = req.body?.projectorVersion;
+    if (version !== undefined && !Number.isSafeInteger(version)) {
+      return fail(res, req, 400, 'INVALID_PROJECTOR_VERSION', 'projectorVersion must be an integer');
+    }
+    try {
+      const report = await replay.replay({ dryRun, projectorVersion: version });
+      if (report.outcome === 'refused') {
+        return res.status(409).json({
+          success: false,
+          code: 'REPLAY_REFUSED',
+          error: `Replay not applied: ${report.reasons.join('; ')}`,
+          data: report,
+          correlationId: req.correlationId,
+        });
+      }
+      if (report.outcome === 'applied') {
+        auditStore.recordEvent({
+          action: 'MAINTAINER_ACTION',
+          actor: { type: 'maintainer', id: 'ops-admin' },
+          scope: { entityType: 'system', entityId: 'search_index' },
+          reason: 'Search index rebuilt by event replay',
+          metadata: { projectorVersion: report.projectorVersion, events: report.events.total, diff: report.diff },
+          correlationId: req.correlationId,
+        });
+      }
+      res.json({ success: true, data: report, correlationId: req.correlationId });
+    } catch (err) {
+      if (err instanceof UnknownProjectorVersionError) return fail(res, req, 400, 'INVALID_PROJECTOR_VERSION', err.message);
+      if (err instanceof ReplayInProgressError) return fail(res, req, 409, 'REPLAY_IN_PROGRESS', err.message);
+      next(err);
+    }
+  });
+
+  router.post('/ops/projections/search-index/rollback', admin, (req, res) => {
+    try {
+      const result = replay.rollback();
+      auditStore.recordEvent({
+        action: 'MAINTAINER_ACTION',
+        actor: { type: 'maintainer', id: 'ops-admin' },
+        scope: { entityType: 'system', entityId: 'search_index' },
+        reason: 'Search index replay rolled back',
+        metadata: result,
+        correlationId: req.correlationId,
+      });
+      res.json({ success: true, data: result, correlationId: req.correlationId });
+    } catch (err) {
+      if (err instanceof NothingToRollBackError) return fail(res, req, 409, 'NOTHING_TO_ROLL_BACK', err.message);
+      throw err;
     }
   });
 

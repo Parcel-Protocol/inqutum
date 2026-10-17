@@ -27,12 +27,33 @@ export type FeatureFlag = keyof typeof FEATURE_FLAGS;
 const ON = new Set(['true', '1', 'on']);
 const OFF = new Set(['false', '0', 'off']);
 
-export function isFeatureEnabled(flag: FeatureFlag, env: RuntimeEnvironment = process.env): boolean {
+/**
+ * Process-local runtime overrides. Written only by the audited admin config
+ * service (config/admin-config.ts), never directly; lost on restart, when the
+ * environment value applies again. See docs/ADMIN_CONFIG_AUDIT.md.
+ */
+const runtimeOverrides = new Map<FeatureFlag, boolean>();
+
+export const featureFlagOverrides = {
+  get: (flag: FeatureFlag): boolean | undefined => runtimeOverrides.get(flag),
+  /** `null` clears the override. */
+  set: (flag: FeatureFlag, value: boolean | null): void => {
+    if (value === null) runtimeOverrides.delete(flag);
+    else runtimeOverrides.set(flag, value);
+  },
+};
+
+/** The value the environment (or the safe default) gives a flag, ignoring runtime overrides. */
+export function environmentFeatureValue(flag: FeatureFlag, env: RuntimeEnvironment = process.env): boolean {
   const definition: FlagDefinition = FEATURE_FLAGS[flag];
   const raw = env[definition.env]?.trim().toLowerCase();
   if (raw && ON.has(raw)) return true;
   if (raw && OFF.has(raw)) return false;
   return definition.safeDefault;
+}
+
+export function isFeatureEnabled(flag: FeatureFlag, env: RuntimeEnvironment = process.env): boolean {
+  return runtimeOverrides.get(flag) ?? environmentFeatureValue(flag, env);
 }
 
 /** Effective state of every flag, reported by /api/health for rollout checks. */

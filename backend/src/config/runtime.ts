@@ -78,7 +78,8 @@ export function corsOptions(env: RuntimeEnvironment = process.env || {}): CorsOp
   return {
     credentials: true,
     methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Accept', 'X-Correlation-ID', 'X-Request-ID'],
+    // Idempotency-Key lets a browser retry POST /invoices/:id/send-email safely (#289).
+    allowedHeaders: ['Content-Type', 'Accept', 'X-Correlation-ID', 'X-Request-ID', 'Idempotency-Key'],
     exposedHeaders: ['X-Correlation-ID', 'X-Request-ID'],
     maxAge: 86400,
     origin(origin, callback) {
