@@ -95,3 +95,5 @@ export function startExpiryScheduler(queue: JobQueue, intervalMs = EXPIRY_SWEEP_
 export function createJobStore(pool?: ConstructorParameters<typeof PostgresJobStore>[0]): JobStore {
   return assertJobStore(pool ? new PostgresJobStore(pool) : new MemoryJobStore());
 }
+
+export * from './backpressure';
