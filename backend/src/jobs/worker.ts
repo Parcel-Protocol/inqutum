@@ -9,6 +9,11 @@ import {
   RetryPolicy,
   computeBackoffMs,
 } from './job-types';
+import {
+  generateCorrelationId,
+  getCorrelationId,
+  runWithCorrelation,
+} from '../observability/correlation';
 
 export interface JobContext {
   job: Job;
@@ -16,6 +21,8 @@ export interface JobContext {
   attempt: number;
   /** Stable across retries; use it to make side effects idempotent. */
   idempotencyKey: string;
+  /** Distributed correlation ID across API, worker, and external calls. */
+  correlationId: string;
 }
 
 export type JobHandler = (payload: Job['payload'], ctx: JobContext) => Promise<unknown>;
@@ -29,6 +36,7 @@ export class JobQueue {
 
   async enqueue(type: string, data: Record<string, unknown> = {}, options: EnqueueOptions = {}) {
     const now = this.now();
+    const correlationId = options.correlationId ?? getCorrelationId() ?? null;
     const job: Job = {
       id: uuidv4(),
       type,
@@ -40,7 +48,7 @@ export class JobQueue {
       lockedUntil: null,
       lockedBy: null,
       idempotencyKey: options.idempotencyKey ?? null,
-      correlationId: options.correlationId ?? null,
+      correlationId,
       errors: [],
       result: null,
       createdAt: now.toISOString(),
@@ -95,18 +103,35 @@ export class JobWorker {
     if (!claimed) return null;
 
     const handler = this.handlers.get(claimed.type)!;
-    try {
-      const result = await handler(claimed.payload, {
-        job: claimed,
-        attempt: claimed.attempts,
-        idempotencyKey: claimed.idempotencyKey ?? claimed.id,
-      });
-      const done = await this.store.markSucceeded(claimed.id, this.workerId, result, this.now());
-      if (!done) this.log('lease lost before completion; result discarded', { jobId: claimed.id });
-      return done ?? claimed;
-    } catch (err) {
-      return this.handleFailure(claimed, err);
-    }
+    const jobCorrelationId = claimed.correlationId ?? generateCorrelationId('job');
+
+    return runWithCorrelation(
+      {
+        correlationId: jobCorrelationId,
+        source: 'worker',
+        metadata: { jobId: claimed.id, jobType: claimed.type, attempt: claimed.attempts },
+      },
+      async () => {
+        try {
+          const result = await handler(claimed.payload, {
+            job: claimed,
+            attempt: claimed.attempts,
+            idempotencyKey: claimed.idempotencyKey ?? claimed.id,
+            correlationId: jobCorrelationId,
+          });
+          const done = await this.store.markSucceeded(claimed.id, this.workerId, result, this.now());
+          if (!done) {
+            this.log('lease lost before completion; result discarded', {
+              jobId: claimed.id,
+              correlationId: jobCorrelationId,
+            });
+          }
+          return done ?? claimed;
+        } catch (err) {
+          return this.handleFailure(claimed, err, jobCorrelationId);
+        }
+      }
+    );
   }
 
   /** Drains all currently-due jobs. */
@@ -135,8 +160,9 @@ export class JobWorker {
     this.timer = null;
   }
 
-  private async handleFailure(job: Job, err: unknown): Promise<Job> {
+  private async handleFailure(job: Job, err: unknown, correlationId?: string): Promise<Job> {
     const error = err instanceof Error ? err : new Error(String(err));
+    const corrId = correlationId ?? job.correlationId ?? getCorrelationId() ?? generateCorrelationId('job');
     const record: JobError = {
       attempt: job.attempts,
       at: this.now().toISOString(),
@@ -152,8 +178,10 @@ export class JobWorker {
       jobId: job.id,
       type: job.type,
       attempt: job.attempts,
+      correlationId: corrId,
       error: error.message,
     });
     return updated ?? job;
   }
 }
+

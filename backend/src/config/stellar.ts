@@ -30,10 +30,15 @@ export const NETWORK_PASSPHRASE =
 export const ALLOW_INSECURE_HORIZON =
   /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i.test(STELLAR_HORIZON_URL);
 
+import { attachStellarCorrelationInterceptor } from '../observability/correlation';
+
 // Stellar server instance
 export const server = new StellarSdk.Horizon.Server(STELLAR_HORIZON_URL, {
   allowHttp: ALLOW_INSECURE_HORIZON,
 });
+
+// Ensure outgoing Horizon HTTP calls inherit distributed correlation headers
+attachStellarCorrelationInterceptor();
 
 // Seller account configuration
 export const SELLER_PUBLIC_KEY = process.env.SELLER_PUBLIC_KEY || '';

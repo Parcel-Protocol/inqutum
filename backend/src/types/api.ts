@@ -5,6 +5,7 @@ import {
   DOMAIN_ERROR_TAXONOMY,
   classifyError,
 } from '../errors/error-taxonomy';
+import { getCorrelationId } from '../observability/correlation';
 
 // Shared response envelope used by both the MVP and the Postgres server.
 // Both servers send the same success/failure shape so clients stay
@@ -97,7 +98,7 @@ export function sendSuccess<T>(
   data: T,
   extra?: { message?: string; pagination?: ApiPagination; correlationId?: string; apiVersion?: string }
 ): void {
-  const corrId = extra?.correlationId || (res.req as any)?.correlationId;
+  const corrId = extra?.correlationId || (res.req as any)?.correlationId || getCorrelationId();
   res.status(status).json(apiSuccess(data, { ...extra, correlationId: corrId }));
 }
 
@@ -113,7 +114,7 @@ export function sendFailure(
     correlationId?: string;
   }
 ): void {
-  const corrId = extra?.correlationId || (res.req as any)?.correlationId;
+  const corrId = extra?.correlationId || (res.req as any)?.correlationId || getCorrelationId();
 
   if (typeof error === 'object' && error !== null) {
     const classified = classifyError(error);
@@ -145,7 +146,7 @@ export function sendVerificationFailure(
   error: string,
   correlationId?: string
 ): void {
-  const corrId = correlationId || (res.req as any)?.correlationId;
+  const corrId = correlationId || (res.req as any)?.correlationId || getCorrelationId();
   const taxonomy = DOMAIN_ERROR_TAXONOMY[code];
 
   res.status(status).json({

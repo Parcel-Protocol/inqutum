@@ -38,6 +38,7 @@ import {
   runWithCheckpoint,
   type CheckpointStore,
 } from '../recovery/side-effect-checkpoint';
+import { withCorrelationHeaders, getCorrelationId } from '../observability/correlation';
 
 export type EmailStatus = 'sent' | 'failed' | 'bounced' | 'complained';
 
@@ -62,6 +63,7 @@ export interface EmailMessage {
   text?: string;
   html?: string;
   replyTo?: string;
+  correlationId?: string;
   /** Suppresses duplicate sends on retry; the store keys deliveries by it. */
   idempotencyKey?: string;
   /** Free-form context (invoice id, asset, amount) recorded with the attempt. */
@@ -435,6 +437,7 @@ export class EmailDeliveryService {
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
       try {
         const result = await this.transport.send(message);
+        const effectiveCorrId = message.correlationId ?? getCorrelationId();
         const delivery = this.store.record({
           to: message.to,
           subject: message.subject,
@@ -442,11 +445,11 @@ export class EmailDeliveryService {
           provider: this.transport.name,
           providerMessageId: result.providerMessageId,
           attempts: attempt,
-          metadata: message.metadata
-            ? { ...message.metadata, idempotencyKey: message.idempotencyKey ?? '' }
-            : message.idempotencyKey
-              ? { idempotencyKey: message.idempotencyKey }
-              : undefined,
+          metadata: {
+            ...(message.metadata ?? {}),
+            ...(message.idempotencyKey ? { idempotencyKey: message.idempotencyKey } : {}),
+            ...(effectiveCorrId ? { correlationId: effectiveCorrId } : {}),
+          },
         });
         return { status: 'sent', ok: true, delivery, message: 'Accepted by provider' };
       } catch (error) {
@@ -457,6 +460,7 @@ export class EmailDeliveryService {
     }
 
     const error = lastError ?? new EmailDeliveryError('Unknown provider error', 'permanent');
+    const effectiveCorrId = message.correlationId ?? getCorrelationId();
     const delivery = this.store.record({
       to: message.to,
       subject: message.subject,
@@ -466,9 +470,11 @@ export class EmailDeliveryService {
       providerCode: error.providerCode,
       attempts: this.maxAttempts,
       errorMessage: error.message,
-      metadata: message.idempotencyKey
-        ? { idempotencyKey: message.idempotencyKey }
-        : message.metadata,
+      metadata: {
+        ...(message.metadata ?? {}),
+        ...(message.idempotencyKey ? { idempotencyKey: message.idempotencyKey } : {}),
+        ...(effectiveCorrId ? { correlationId: effectiveCorrId } : {}),
+      },
     });
 
     return {
@@ -551,14 +557,18 @@ export function createHttpApiTransport(options: HttpApiTransportOptions): EmailT
           });
         }
       }
+      const headers = withCorrelationHeaders(
+        {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${options.token}`,
+        },
+        message.correlationId
+      );
       const response = await doFetch(options.endpoint, {
         method: 'POST',
         // A redirect would re-send the message body to a host nobody allow-listed.
         redirect: 'error',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${options.token}`,
-        },
+        headers,
         body: JSON.stringify({
           from: options.from,
           to: message.to,
@@ -598,13 +608,21 @@ export function createSmtpTransport(
   return {
     name: providerName,
     async send(message: EmailMessage) {
-      const info = await client.sendMail({
+      const effectiveCorrId = message.correlationId ?? getCorrelationId();
+      const mailPayload: Record<string, unknown> = {
         to: message.to,
         subject: message.subject,
         text: message.text,
         html: message.html,
         replyTo: message.replyTo,
-      });
+      };
+      if (effectiveCorrId) {
+        mailPayload.headers = {
+          'X-Correlation-ID': effectiveCorrId,
+          'X-Request-ID': effectiveCorrId,
+        };
+      }
+      const info = await client.sendMail(mailPayload);
       if (info.rejected?.length && !info.accepted?.length) {
         throw new EmailDeliveryError('All recipients were rejected by the SMTP server', 'invalid_recipient', {
           retryable: false,
@@ -618,5 +636,6 @@ export function createSmtpTransport(
     },
   };
 }
+
 
 export const emailDeliveryService = new EmailDeliveryService();

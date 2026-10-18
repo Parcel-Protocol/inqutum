@@ -19,8 +19,8 @@
 export type ProbeFailureReason = 'unauthorized' | 'client_error' | 'server_error' | 'unreachable' | 'invalid_body';
 
 export type ProbeResult =
-  | { ok: true; status: number; body: any; attempts: number }
-  | { ok: false; reason: ProbeFailureReason; status: number | null; body: any; attempts: number; message: string };
+  | { ok: true; status: number; body: any; attempts: number; correlationId?: string }
+  | { ok: false; reason: ProbeFailureReason; status: number | null; body: any; attempts: number; message: string; correlationId?: string };
 
 export interface ProbeOptions {
   fetchImpl?: typeof fetch;
@@ -29,6 +29,7 @@ export interface ProbeOptions {
   baseDelayMs?: number;
   maxDelayMs?: number;
   timeoutMs?: number;
+  correlationId?: string;
   /** Used to resolve HTTP-date Retry-After values. */
   now?: () => number;
 }
@@ -72,25 +73,31 @@ export async function probeJson(url: string, options: ProbeOptions = {}): Promis
   const baseDelayMs = options.baseDelayMs ?? 1_000;
   const maxDelayMs = options.maxDelayMs ?? 8_000;
   const timeoutMs = options.timeoutMs ?? 10_000;
+  const correlationId =
+    options.correlationId ?? `probe-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 8)}`;
 
   let last: Extract<ProbeResult, { ok: false }> = {
-    ok: false, reason: 'unreachable', status: null, body: null, attempts: 0, message: 'not attempted',
+    ok: false, reason: 'unreachable', status: null, body: null, attempts: 0, message: 'not attempted', correlationId,
   };
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let retryAfter: string | null = null;
     try {
       const response = await fetchImpl(url, {
-        headers: { accept: 'application/json' },
+        headers: {
+          accept: 'application/json',
+          'X-Correlation-ID': correlationId,
+          'X-Request-ID': correlationId,
+        },
         signal: AbortSignal.timeout(timeoutMs),
       });
       const body = await response.json().catch(() => undefined);
 
       if (response.ok) {
-        if (body !== undefined) return { ok: true, status: response.status, body, attempts: attempt };
-        last = { ok: false, reason: 'invalid_body', status: response.status, body: null, attempts: attempt, message: `GET ${url} returned non-JSON` };
+        if (body !== undefined) return { ok: true, status: response.status, body, attempts: attempt, correlationId };
+        last = { ok: false, reason: 'invalid_body', status: response.status, body: null, attempts: attempt, message: `GET ${url} returned non-JSON`, correlationId };
       } else {
-        const failure = { status: response.status, body: body ?? null, attempts: attempt, message: `GET ${url} -> HTTP ${response.status}` };
+        const failure = { status: response.status, body: body ?? null, attempts: attempt, message: `GET ${url} -> HTTP ${response.status}`, correlationId };
         if (response.status === 401 || response.status === 403) return { ok: false, reason: 'unauthorized', ...failure };
         if (!RETRYABLE_STATUSES.has(response.status)) {
           return { ok: false, reason: response.status >= 500 ? 'server_error' : 'client_error', ...failure };
@@ -100,10 +107,11 @@ export async function probeJson(url: string, options: ProbeOptions = {}): Promis
       }
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      last = { ok: false, reason: 'unreachable', status: null, body: null, attempts: attempt, message: `GET ${url} failed: ${detail}` };
+      last = { ok: false, reason: 'unreachable', status: null, body: null, attempts: attempt, message: `GET ${url} failed: ${detail}`, correlationId };
     }
 
     if (attempt < maxAttempts) await sleep(backoffDelay(attempt, baseDelayMs, maxDelayMs, retryAfter, options.now));
   }
   return last;
 }
+

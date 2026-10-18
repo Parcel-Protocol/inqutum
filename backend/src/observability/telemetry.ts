@@ -20,6 +20,16 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { performance } from 'perf_hooks';
+import {
+  CORRELATION_HEADER,
+  REQUEST_ID_HEADER,
+  generateCorrelationId,
+  getCorrelationId,
+  runWithCorrelation,
+  sanitizeCorrelationId,
+} from './correlation';
+
+export * from './correlation';
 
 // Extend Express Request interface to carry correlationId & startTime
 declare global {
@@ -415,16 +425,14 @@ export const metrics = MetricsRegistry.getInstance();
  */
 export function correlationMiddleware() {
   return (req: Request, res: Response, next: NextFunction) => {
-    const headerCorrelationId = req.header('x-correlation-id') || req.header('x-request-id');
-    const correlationId =
-      headerCorrelationId && headerCorrelationId.trim().length > 0
-        ? headerCorrelationId.trim()
-        : `req-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 8)}`;
+    const rawHeader = req.header('x-correlation-id') || req.header('x-request-id');
+    const correlationId = sanitizeCorrelationId(rawHeader, 'req');
 
     req.correlationId = correlationId;
     req.startTime = performance.now();
 
-    res.setHeader('X-Correlation-ID', correlationId);
+    res.setHeader(CORRELATION_HEADER, correlationId);
+    res.setHeader(REQUEST_ID_HEADER, correlationId);
 
     res.on('finish', () => {
       const duration = req.startTime ? performance.now() - req.startTime : 0;
@@ -432,7 +440,9 @@ export function correlationMiddleware() {
       metrics.recordHttpRequest(req.method, route, res.statusCode);
     });
 
-    next();
+    runWithCorrelation({ correlationId, source: 'api' }, () => {
+      next();
+    });
   };
 }
 
@@ -447,7 +457,7 @@ export async function measureOperation<T>(
   metadata?: Record<string, any>
 ): Promise<T> {
   const start = performance.now();
-  const corrId = correlationId || `op-${Date.now().toString(36)}`;
+  const corrId = correlationId || getCorrelationId() || generateCorrelationId('sys');
 
   try {
     const result = await fn();
