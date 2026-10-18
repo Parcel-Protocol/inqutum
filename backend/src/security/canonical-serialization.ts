@@ -238,3 +238,6 @@ export function canonicalSigningPayload(
   const ts = timestamp !== undefined ? String(timestamp) : '';
   return ts ? `${prefix}.${ts}.${canonicalBody}` : `${prefix}.${canonicalBody}`;
 }
+
+export const canonicalizeJson = canonicalize;
+

@@ -66,3 +66,19 @@ Content-Type: application/json
 - **Unsettled Transactions in Deprecated Assets**: When removing an asset from `allowedAssets`, the simulation explicitly calculates the unpaid volume at risk and warns against cutover without a grace period.
 - **Irreversible Cutover Failure**: If an operator commits a policy restriction without grandfathering, existing checkout pages for pending invoices fail verification.
 - **Rollback Procedure**: Policy updates in Inqutum are managed via environment configuration variables (`POLICY_MIN_INVOICE_AMOUNT`, `POLICY_MAX_INVOICE_AMOUNT`, `POLICY_ALLOWED_ASSETS`). Rolling back requires restoring the prior environment variables; if invoices were expired prematurely during the window, recovery jobs can inspect the simulation audit log to identify affected records for seller notification.
+
+## Maintainer Policy Simulation Tool & CLI
+
+`runMaintainerPolicySimulation` in `backend/src/domain/policy-simulation.ts` extends the preview engine with:
+- **Strict Proposal Validation**: Rejects unknown policy keys, negative/NaN amounts, inconsistent bounds (`minAmount > maxAmount`, `minExpiryDays > maxExpiryDays`), and invalid asset codes with `400 INVALID_POLICY_PROPOSAL`.
+- **Maintainer Authorization**: Enforces `role: 'maintainer' | 'admin'` (`403 POLICY_SIMULATION_FORBIDDEN`).
+- **Selected Records & Fixtures**: Supports `fixtureName` (`standard`, `high-volume`, `multi-asset`, `active-workflows`) and `selection` (`recordIds`, `sellerPublicKeys`, `statuses`, `jobTypes`).
+- **Active Workflow Simulation**: Evaluates queued and running background jobs (`maxRetryAttempts`, linked non-compliant invoices).
+- **Cryptographic Read-Only Proof**: Computes pre/post SHA-256 dataset digests (`inputDigestHex`, `readOnlyVerified: true`).
+
+```bash
+cd backend
+npm run policy:simulate -- --fixture standard --max-amount 500
+npx tsx --test tests/policy-simulation.test.ts
+```
+

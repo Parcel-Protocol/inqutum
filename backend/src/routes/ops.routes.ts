@@ -11,9 +11,27 @@ import {
   type ImpersonationPermission,
 } from '../audit/impersonation';
 import { stellarPublicKeySchema } from '../utils/validation';
-import { simulatePolicyChange } from '../domain/policy-simulation';
+import {
+  simulatePolicyChange,
+  runMaintainerPolicySimulation,
+  PolicySimulationPermissionError,
+  PolicySimulationValidationError,
+} from '../domain/policy-simulation';
 import { evaluatePolicyDryRun, parsePolicyDryRunRequest, PolicyDryRunError } from '../domain/policy-dry-run';
 import { loadPolicy } from '../domain/policy';
+import {
+  TrendExportService,
+  TrendExportPermissionError,
+  TrendExportValidationError,
+  type TrendWindowGranularity,
+} from '../exports/trend-export';
+import { explainRejection } from '../errors/rejection-explanation';
+import {
+  ExternalReferenceVerificationService,
+  defaultExternalReferenceVerifier,
+  type ExternalReferenceInput,
+  type ExternalReferenceProbe,
+} from '../services/external-reference-verification';
 import { CapabilityError, CapabilityTokenService, capabilityServiceFromEnv } from '../security/capability-tokens';
 import { AdminConfigError, AdminConfigService, adminConfig } from '../config/admin-config';
 import { staleProjectionService } from '../ops/stale-projections.service';
@@ -74,6 +92,12 @@ export interface OpsRouterOptions {
   replay?: ProjectionReplayService;
   /** Resumable record repair service for orphaned and inconsistent records. */
   repairService?: ResumableRepairService;
+  /** Historical trend export service. */
+  trendExport?: TrendExportService;
+  /** Resilient external reference verification service. */
+  externalReferences?: ExternalReferenceVerificationService;
+  /** Custom external reference probe for verification routes. */
+  externalReferenceProbe?: ExternalReferenceProbe;
 }
 
 function defaultApprovals(): MaintainerApprovalService | null {
@@ -129,6 +153,14 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
       events: () => auditStore.listChronological(),
     });
   const repairService = options.repairService ?? new ResumableRepairService({ db: pool });
+  const trendExport =
+    options.trendExport ??
+    new TrendExportService({
+      storage: options.storage,
+      jobs: options.jobs,
+      recentLogs: () => metrics.getRecentLogs(200),
+    });
+  const externalReferences = options.externalReferences ?? defaultExternalReferenceVerifier;
 
   if (approvals && options.jobs) {
     const jobs = options.jobs;
@@ -310,11 +342,57 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
   // Policy simulation preview before committing changes (Issue #267)
   router.post('/ops/policy/simulate', admin, async (req, res, next) => {
     try {
-      const invoices = options.storage.getAllInvoices ? await options.storage.getAllInvoices() : [];
       const current = loadPolicy();
-      const simulation = simulatePolicyChange(invoices, req.body?.proposedPolicy || {}, current);
+      const rawPolicy = req.body?.proposedPolicy;
+      const actor = req.body?.actor ?? { id: 'ops-admin', role: 'maintainer' };
+
+      // When caller supplies explicit proposedPolicy fields, selection, fixtureName, or actor,
+      // run the full maintainer simulation tool with strict validation and workflow checks.
+      if (
+        req.body?.fixtureName ||
+        req.body?.selection ||
+        req.body?.actor ||
+        (rawPolicy !== undefined &&
+          (typeof rawPolicy !== 'object' ||
+            rawPolicy === null ||
+            Array.isArray(rawPolicy) ||
+            Object.keys(rawPolicy).length > 0))
+      ) {
+        const invoices =
+          req.body?.fixtureName || !options.storage.getAllInvoices
+            ? []
+            : await options.storage.getAllInvoices();
+        const workflows = options.jobs ? (await options.jobs.list({ limit: 1000 })).jobs : [];
+        const simulation = runMaintainerPolicySimulation({
+          actor,
+          proposedPolicy: rawPolicy,
+          currentPolicy: current,
+          invoices,
+          workflows,
+          selection: req.body?.selection,
+          fixtureName: req.body?.fixtureName,
+          maxExamples: req.body?.maxExamples,
+        });
+        return res.json({ success: true, data: simulation, correlationId: req.correlationId });
+      }
+
+      const invoices = options.storage.getAllInvoices ? await options.storage.getAllInvoices() : [];
+      const simulation = simulatePolicyChange(invoices, rawPolicy || {}, current);
       res.json({ success: true, data: simulation, correlationId: req.correlationId });
     } catch (err) {
+      if (
+        err instanceof PolicySimulationPermissionError ||
+        err instanceof PolicySimulationValidationError
+      ) {
+        const explanation = explainRejection(err, { correlationId: req.correlationId });
+        return res.status(err.httpStatus).json({
+          success: false,
+          code: err.code,
+          error: err.message,
+          explanation,
+          correlationId: req.correlationId,
+        });
+      }
       next(err);
     }
   });
@@ -668,6 +746,154 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
       });
     }
     return res.json({ success: true, data: { sessionId, closed: true }, correlationId: req.correlationId });
+  });
+
+  // -- Historical trend export for operational and financial metrics ---------
+
+  const handleTrendExport = async (req: any, res: any, next: any) => {
+    try {
+      const sourceParams = req.method === 'GET' ? req.query : req.body ?? {};
+      const actor = sourceParams.actor ?? {
+        id: String(sourceParams.actorId ?? 'ops-admin'),
+        role: String(sourceParams.role ?? 'maintainer'),
+      };
+      const dimensions =
+        typeof sourceParams.dimensions === 'string'
+          ? sourceParams.dimensions.split(',').map((d: string) => d.trim()).filter(Boolean)
+          : Array.isArray(sourceParams.dimensions)
+          ? sourceParams.dimensions
+          : undefined;
+
+      const artifact = await trendExport.exportTrends({
+        actor,
+        granularity: sourceParams.granularity as TrendWindowGranularity | undefined,
+        format: sourceParams.format === 'csv' ? 'csv' : sourceParams.format === 'json' ? 'json' : undefined,
+        from: sourceParams.from,
+        to: sourceParams.to,
+        dimensions,
+        fillEmptyBuckets: Boolean(sourceParams.fillEmptyBuckets),
+        maxBuckets: sourceParams.maxBuckets !== undefined ? Number(sourceParams.maxBuckets) : undefined,
+        maxSourceRecords:
+          sourceParams.maxSourceRecords !== undefined ? Number(sourceParams.maxSourceRecords) : undefined,
+      });
+
+      auditStore.recordEvent({
+        action: 'MAINTAINER_ACTION',
+        actor: { type: 'maintainer', id: actor.id },
+        scope: { entityType: 'system', entityId: artifact.meta.exportId },
+        reason: 'Historical trend export generated',
+        metadata: {
+          schema: artifact.meta.schema,
+          schemaVersion: artifact.meta.schemaVersion,
+          granularity: artifact.meta.granularity,
+          bucketCount: artifact.meta.bucketCount,
+          truncated: artifact.meta.truncated,
+        },
+        correlationId: req.correlationId,
+      });
+
+      if (artifact.meta.format === 'csv' && req.query?.raw === 'true') {
+        res.setHeader('Content-Type', artifact.contentType);
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="inqutum-trends-v${artifact.meta.schemaVersion}.csv"`
+        );
+        return res.status(200).send(artifact.body);
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          meta: artifact.meta,
+          totals: artifact.totals,
+          buckets: artifact.buckets,
+          ...(artifact.meta.format === 'csv' ? { csv: artifact.body } : {}),
+        },
+        correlationId: req.correlationId,
+      });
+    } catch (err) {
+      if (err instanceof TrendExportPermissionError || err instanceof TrendExportValidationError) {
+        const explanation = explainRejection(err, { correlationId: req.correlationId });
+        return res.status(err.httpStatus).json({
+          success: false,
+          code: err.code,
+          error: err.message,
+          explanation,
+          correlationId: req.correlationId,
+        });
+      }
+      next(err);
+    }
+  };
+
+  router.post('/ops/trends/export', admin, handleTrendExport);
+  router.get('/ops/trends/export', admin, handleTrendExport);
+
+  // -- Resilient external reference verification -----------------------------
+
+  router.post('/ops/external-references/verify', admin, async (req, res, next) => {
+    try {
+      const input: ExternalReferenceInput = {
+        referenceId: String(req.body?.referenceId ?? ''),
+        referenceType: req.body?.referenceType,
+        invoiceId: String(req.body?.invoiceId ?? ''),
+        externalIdentifier: String(req.body?.externalIdentifier ?? ''),
+        sourceSystem: String(req.body?.sourceSystem ?? 'external-source'),
+        endpoint: typeof req.body?.endpoint === 'string' ? req.body.endpoint : undefined,
+        expectedAmount: typeof req.body?.expectedAmount === 'number' ? req.body.expectedAmount : undefined,
+        expectedAssetCode:
+          typeof req.body?.expectedAssetCode === 'string' ? req.body.expectedAssetCode : undefined,
+      };
+
+      const defaultProbe: ExternalReferenceProbe = async () => {
+        if (req.body?.mockSourceResponse !== undefined) {
+          return req.body.mockSourceResponse;
+        }
+        return {
+          status: 'verified',
+          observedTimestamp: new Date().toISOString(),
+          ledgerSequence: 100_000,
+          settledAmount: input.expectedAmount ?? 100,
+          assetCode: input.expectedAssetCode ?? 'XLM',
+        };
+      };
+
+      const probe = options.externalReferenceProbe ?? defaultProbe;
+      const record =
+        req.body?.singleAttempt === true
+          ? await externalReferences.verifySingleAttempt(input, probe)
+          : await externalReferences.verifyWithRetries(input, probe);
+
+      const status = record.status === 'VERIFIED' ? 200 : record.status === 'RETRY_SCHEDULED' ? 202 : 422;
+      return res.status(status).json({
+        success: record.status === 'VERIFIED',
+        data: record,
+        correlationId: req.correlationId,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/ops/external-references/:id', admin, (req, res) => {
+    const record = externalReferences.getRecord(req.params.id);
+    if (!record) {
+      return fail(res, req, 404, 'REFERENCE_NOT_FOUND', 'External reference verification record not found');
+    }
+    return res.json({ success: true, data: record, correlationId: req.correlationId });
+  });
+
+  // -- User-facing explanation resolver endpoint -----------------------------
+
+  router.post('/ops/rejections/explain', (req, res) => {
+    const explanation = explainRejection(req.body?.error ?? req.body ?? {}, {
+      correlationId: req.correlationId,
+    });
+    res.status(200).json({
+      success: true,
+      data: explanation,
+      correlationId: req.correlationId,
+    });
   });
 
   return router;
