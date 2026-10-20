@@ -74,7 +74,10 @@ export class MemoryEmailDeliveryStorage implements EmailDeliveryStorage {
       list = list.filter((d) => d.status === filter.status);
     }
 
-    list.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    list.sort((a, b) =>
+      b.createdAt.getTime() - a.createdAt.getTime() ||
+      (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)
+    );
 
     const offset = filter.offset || 0;
     const limit = filter.limit || list.length;
@@ -84,7 +87,10 @@ export class MemoryEmailDeliveryStorage implements EmailDeliveryStorage {
   public async getPendingDeliveries(maxCount = 50, now: Date = new Date()): Promise<EmailDelivery[]> {
     const list = Array.from(this.deliveries.values())
       .filter((d) => d.status === 'PENDING' && d.nextAttemptAt.getTime() <= now.getTime())
-      .sort((a, b) => a.nextAttemptAt.getTime() - b.nextAttemptAt.getTime())
+      .sort((a, b) =>
+        a.nextAttemptAt.getTime() - b.nextAttemptAt.getTime() ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+      )
       .slice(0, maxCount);
 
     return list.map((d) => ({ ...d }));

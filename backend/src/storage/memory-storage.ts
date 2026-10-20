@@ -114,7 +114,10 @@ class MemoryStorage {
       invoices = invoices.filter(inv => inv.status === filter.status);
     }
 
-    return invoices.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return invoices.sort((a, b) =>
+      b.createdAt.getTime() - a.createdAt.getTime() ||
+      (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)
+    );
   }
 
   // Get stats
@@ -128,7 +131,10 @@ class MemoryStorage {
   findOverduePending(cutoff: Date): Invoice[] {
     return Array.from(this.invoices.values())
       .filter((invoice) => isPendingInvoiceExpired(invoice, cutoff))
-      .sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime());
+      .sort((a, b) =>
+        a.expiresAt.getTime() - b.expiresAt.getTime() ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+      );
   }
 
   markExpiredInvoices(now: Date = new Date()): number {

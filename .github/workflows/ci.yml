@@ -48,6 +48,28 @@ jobs:
       - name: Release readiness gate
         run: npm run release:check
 
+  synthetic-journey:
+    name: Synthetic critical journey
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      NODE_ENV: test
+      STELLAR_NETWORK: TESTNET
+      STELLAR_HORIZON_URL: http://127.0.0.1:1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Run synthetic journey with bounded retry
+        run: npm run journey:monitor -- --check --retries 2
+
   frontend:
     name: Frontend — lint, typecheck and tests
     runs-on: ubuntu-latest

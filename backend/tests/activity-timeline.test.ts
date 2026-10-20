@@ -79,6 +79,23 @@ describe('activity timeline ordering and paging', () => {
     assert.deepEqual(page.entries.map((e) => e.id), ['d', 'a', 'c', 'b']);
   });
 
+  it('keeps mixed-status events deterministic when timestamps and input order change', () => {
+    const sameTime = [
+      event('status-paid', 'inv-1', 'PAYMENT_CONFIRMED', 20, { txHash: 'a'.repeat(64) }),
+      event('status-cancelled', 'inv-1', 'INVOICE_CANCELLED', 20),
+      event('status-created', 'inv-1', 'INVOICE_CREATED', 20),
+    ];
+    const first = buildActivityTimeline(owner, sameTime, invoices);
+    const second = buildActivityTimeline(owner, [...sameTime].reverse(), invoices);
+
+    assert.deepEqual(first.entries.map((entry) => entry.id), [
+      'status-cancelled',
+      'status-created',
+      'status-paid',
+    ]);
+    assert.deepEqual(second.entries.map((entry) => entry.id), first.entries.map((entry) => entry.id));
+  });
+
   it('pages through every entry exactly once', () => {
     const seen: string[] = [];
     let cursor: string | null = null;

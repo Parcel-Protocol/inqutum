@@ -138,6 +138,20 @@ describe('Retention policy', () => {
 });
 
 describe('Retention — classification of a single record', () => {
+  it('protects every sensitive operational record class at its legal boundary', () => {
+    const records: RetentionRecord[] = [
+      { table: 'transactions', id: 'tx', ageAnchor: daysAgo(10_000) },
+      { table: 'invoices', id: 'paid', ageAnchor: daysAgo(10_000), status: 'PAID', settlementLinked: true },
+      { table: 'payment_events', id: 'event', ageAnchor: daysAgo(10_000), settlementLinked: true },
+      { table: 'jobs', id: 'dead', ageAnchor: daysAgo(60), status: 'dead', deadLetter: true },
+      { table: 'invoices', id: 'held', ageAnchor: daysAgo(10_000), metadata: { under_audit: true } },
+    ];
+
+    for (const record of records) {
+      assert.equal(classifyRecord(record, NOW).verdict.protected, true, record.id);
+    }
+  });
+
   it('protects settlement evidence at any age', () => {
     const ancient = classifyRecord(
       { table: 'transactions', id: 't1', ageAnchor: daysAgo(4000) },
