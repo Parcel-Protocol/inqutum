@@ -20,6 +20,8 @@ import {
 import { sanitizePlainText } from '../security/content-safety';
 import { amountsMatch as stroopAmountsMatch } from '../utils/verify-amount-tolerance';
 import { isFeatureEnabled } from '../config/feature-flags';
+import { parseSettlementTime } from '../domain/invoice-settlement';
+import { horizonMemo, memosMatch, type MemoType } from '../utils/memo-compare';
 
 export const VERIFICATION_CONTRACT_VERSION = '1.0.0';
 
@@ -149,6 +151,8 @@ export interface ExpectedPayment {
 export interface HorizonTransactionLike {
   memo?: string | null;
   memo_type?: string | null;
+  /** Ledger close time; the settlement time recorded for a late payment. */
+  created_at?: string | null;
   envelope_type?: string | null;
   inner_transaction?: HorizonTransactionLike | null;
 }
@@ -162,6 +166,34 @@ export interface HorizonOperationLike {
   asset_code?: string;
   asset_issuer?: string;
   to_muxed_id?: string | number;
+  /** Path payments (strict send): what the destination actually received. */
+  dest_amount?: string;
+  dest_asset_type?: string;
+  dest_asset_code?: string;
+  dest_asset_issuer?: string;
+}
+
+/**
+ * What an operation delivered to its destination, or null if it delivers
+ * nothing. A path payment settles an invoice like a plain payment when the
+ * seller receives the invoiced asset and amount (#378): strict-receive states
+ * the delivered amount directly, strict-send reports it as `dest_*`.
+ */
+function deliveredPayment(operation: HorizonOperationLike): HorizonOperationLike | null {
+  if (operation.type === 'payment' || operation.type === 'path_payment_strict_receive') {
+    return { ...operation, type: 'payment' };
+  }
+  if (operation.type === 'path_payment_strict_send') {
+    return {
+      ...operation,
+      type: 'payment',
+      amount: operation.dest_amount ?? operation.amount,
+      asset_type: operation.dest_asset_type ?? operation.asset_type,
+      asset_code: operation.dest_asset_code ?? operation.asset_code,
+      asset_issuer: operation.dest_asset_issuer ?? operation.asset_issuer,
+    };
+  }
+  return null;
 }
 
 export interface VerifiedPayment {
@@ -239,8 +271,8 @@ export function amountsMatch(actual: unknown, expected: string | number): boolea
 /**
  * Verify a Horizon transaction against what an invoice expects.
  *
- * Policy: any plain `payment` operation that matches the invoice settles it;
- * unrelated operations are ignored. Path payments are never accepted. Fee-bump
+ * Policy: any `payment` or path payment that delivers the invoiced asset and
+ * amount to the invoice destination settles it; unrelated operations are ignored. Fee-bump
  * envelopes use the inner transaction for memo and operations, while the hash
  * supplied by the caller (the outer transaction hash) is persisted.
  * Checks run in a fixed order: tx hash, network, payment operation, memo,
@@ -259,7 +291,9 @@ export function verifyHorizonPayment(input: VerifyPaymentInput): VerificationRes
     return failure('NETWORK_MISMATCH');
   }
 
-  const paymentOps = (operations || []).filter((operation) => operation.type === 'payment');
+  const paymentOps = (operations || [])
+    .map(deliveredPayment)
+    .filter((operation): operation is HorizonOperationLike => operation !== null);
   if (paymentOps.length === 0) {
     return failure('NO_PAYMENT_OPERATION');
   }
@@ -310,29 +344,20 @@ export function verifyHorizonPayment(input: VerifyPaymentInput): VerificationRes
     return failure('ASSET_MISMATCH');
   }
 
+  // Horizon operations are snake_case (`asset_type`), like the matching above.
   const paymentOp = assetMatch;
-  const paidAsset = resolvePaymentAsset({
-    assetType: paymentOp.assetType,
-    assetCode: paymentOp.assetCode,
-    assetIssuer: paymentOp.assetIssuer,
-  });
-
-  if (!assetsMatch(invoiceAsset, paidAsset)) {
-    return failure('ASSET_MISMATCH');
-  }
-
-  const paidAssetCode = paymentOp.assetType === 'native' ? 'XLM' : paymentOp.assetCode ?? '';
+  const paidAssetCode = paymentOp.asset_type === 'native' ? 'XLM' : paymentOp.asset_code ?? '';
   const settledAt = transactionSettlementTime(transaction);
 
   return {
     ok: true,
     value: {
       txHash: hashCheck.value,
-      from: paymentOp.from,
-      to: paymentOp.to,
-      amount: paymentOp.amount,
+      from: paymentOp.from ?? '',
+      to: paymentOp.to ?? '',
+      amount: paymentOp.amount ?? '',
       assetCode: paidAssetCode,
-      assetIssuer: paymentOp.assetType === 'native' ? undefined : paymentOp.assetIssuer,
+      assetIssuer: paymentOp.asset_type === 'native' ? undefined : paymentOp.asset_issuer,
       memo: transaction?.memo ?? '',
       ...(settledAt ? { settledAt } : {}),
     },

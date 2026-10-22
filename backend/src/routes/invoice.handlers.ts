@@ -10,6 +10,7 @@ import stellarService from '../services/stellar.service';
 import { cancelInvoiceSchema, createInvoiceSchema, stellarPublicKeySchema } from '../utils/validation';
 import { generatePaymentQR, generateStellarPaymentQR } from '../utils/qrcode';
 import { sendFailure, sendSuccess, sendVerificationFailure } from '../types/api';
+import { mayAccessSeller, sendForbiddenOwnership } from '../middleware/access-control';
 import { INVOICE_STATUSES, type InvoiceStatus, type InvoiceStorage, type StoredInvoice } from '../storage/invoice-storage';
 import { decodeInvoiceCursor, encodeInvoiceCursor } from '../storage/invoice-cursor';
 import { STELLAR_NETWORK } from '../config/stellar';
@@ -22,7 +23,15 @@ import {
   messageForCode,
   verifyHorizonPayment,
 } from '../services/payment-verification';
-import { simulationAllowed } from '../config/runtime';
+import { cutoverDrainMode, isDemoEnvironment, simulationAllowed } from '../config/runtime';
+import { PaymentClaimError } from '../domain/payment-attribution';
+import { LATE_PAYMENT_WARNINGS, SettlementTimeUnavailableError } from '../domain/invoice-settlement';
+import { InvalidTransitionError, describeLifecycle } from '../../../shared/invoice-lifecycle';
+import { cacheVerificationResult } from '../middleware/verify-cache';
+import { emailAntiSpamService } from '../services/email-anti-spam.service';
+import { quotaManager } from '../domain/quota-management';
+import { verifySellerSignature } from '../utils/signature-verification';
+import { canonicalCancelMessage } from '../utils/canonical-serialization';
 import { metrics } from '../observability/telemetry';
 import { exportAuditEvents, AuditAction } from '../audit/audit-service';
 import { classifyError } from '../errors/error-taxonomy';
@@ -61,6 +70,8 @@ export interface InvoiceHandlerOptions {
   notifications?: NotificationService;
   /** Defaults to the process-wide email service. */
   emailService?: EmailService;
+  /** Require an ed25519 seller signature on cancel. Defaults to REQUIRE_CANCEL_SIGNATURE. */
+  requireCancelSignature?: boolean;
 }
 
 export interface InvoiceHandlers {
@@ -201,6 +212,11 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
     },
 
     async createInvoice(req: Request, res: Response) {
+      // Cutover drain (restored after #328): no new invoices while data moves;
+      // existing invoices stay readable and payable.
+      if (cutoverDrainMode()) {
+        return sendFailure(res, 503, 'System is in cutover drain mode. New invoice creation is temporarily paused.');
+      }
       const start = performance.now();
       const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
 
@@ -571,8 +587,62 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
       const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
 
       try {
-        const expectedVersion = req.body?.version ?? (req.headers && req.headers['if-match'] ? Number(req.headers['if-match']) : undefined);
         const originalInvoice = await storage.getInvoiceById(req.params.id);
+        if (!originalInvoice) {
+          return sendFailure(res, 404, 'Invoice not found', 'INVOICE_NOT_FOUND');
+        }
+        const bodyCheck = cancelInvoiceSchema.safeParse(req.body ?? {});
+        if (!bodyCheck.success) {
+          return sendFailure(res, 400, 'sellerPublicKey must be a valid Stellar public key', 'INVALID_SELLER_PUBLIC_KEY');
+        }
+
+        // Optional cryptographic proof of ownership (ed25519 over the canonical
+        // cancel message), on top of the session check below.
+        const bodyKey = bodyCheck.data.sellerPublicKey;
+        const headerKey = req.headers?.['x-seller-public-key'];
+        const sellerPublicKey: string | undefined =
+          bodyKey || (Array.isArray(headerKey) ? headerKey[0] : headerKey) || undefined;
+        const headerSig = req.headers?.['x-signature'] ?? req.headers?.['x-seller-signature'];
+        const signature: string | undefined =
+          req.body?.signature || (Array.isArray(headerSig) ? headerSig[0] : headerSig) || undefined;
+        const requireSignature =
+          options.requireCancelSignature ?? process.env.REQUIRE_CANCEL_SIGNATURE === 'true';
+
+        if (requireSignature && (!sellerPublicKey || !signature)) {
+          return sendFailure(res, 401, 'Cancellation requires seller proof of ownership (signature)', 'UNAUTHORIZED');
+        }
+        if (signature) {
+          if (!sellerPublicKey) {
+            return sendFailure(res, 401, 'Seller public key is required when providing a signature', 'UNAUTHORIZED');
+          }
+          if (originalInvoice.sellerPublicKey !== sellerPublicKey) {
+            return sendFailure(res, 401, 'Signer is not the seller of this invoice', 'UNAUTHORIZED');
+          }
+          const candidateMessages = [
+            canonicalCancelMessage(req.params.id, sellerPublicKey),
+            // Legacy signatures remain valid during the protocol migration.
+            req.params.id,
+            `cancel:${req.params.id}`,
+          ];
+          if (typeof req.body?.message === 'string') candidateMessages.push(req.body.message);
+          if (!verifySellerSignature(sellerPublicKey, signature, candidateMessages)) {
+            return sendFailure(res, 401, 'Invalid signature for cancellation', 'INVALID_SIGNATURE');
+          }
+        }
+
+        // Ownership after the proof checks, as before #328: a bad signature is a
+        // 401, a well-formed request for someone else's invoice is a 403.
+        if (req.actor?.role === 'end_user' && sellerPublicKey && sellerPublicKey !== req.actor.wallet) {
+          return sendForbiddenOwnership(res);
+        }
+        if (sellerPublicKey && sellerPublicKey !== originalInvoice.sellerPublicKey) {
+          return sendFailure(res, 403, 'Unauthorized: only the seller can cancel this invoice', 'FORBIDDEN');
+        }
+        if (!mayAccessSeller(req.actor, 'invoice:cancel', originalInvoice.sellerPublicKey)) {
+          return sendForbiddenOwnership(res);
+        }
+
+        const expectedVersion = req.body?.version ?? (req.headers && req.headers['if-match'] ? Number(req.headers['if-match']) : undefined);
         const invoice = await storage.cancelInvoice(req.params.id, expectedVersion);
 
         // Record audit trail event
@@ -630,6 +700,10 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
             code: 'CONFLICT',
             correlationId: corrId,
           });
+        }
+
+        if (error instanceof InvalidTransitionError) {
+          return sendInvalidTransition(res, error);
         }
 
         logError('Cancel invoice error:', error);
@@ -714,7 +788,10 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         }
 
         const statusCheck = checkInvoiceIsPayable(invoice.status);
-        if (!statusCheck.ok) {
+        // A cancelled invoice can still be settled late: the funds already
+        // reached the seller, so the store records them with a warning
+        // (SETTLE_AFTER_CANCEL) instead of the verify path refusing them.
+        if (!statusCheck.ok && invoice.status !== 'CANCELLED') {
           const duration = performance.now() - start;
           metrics.recordOperation({
             operation: 'invoice.verify_payment',
@@ -803,7 +880,9 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
             verification.value.txHash,
             verification.value.from,
             payerCheck.value,
-            paymentExpectedVersion
+            // Ledger close time classifies a late payment; the version guards
+            // against a concurrent change since the caller's read.
+            { settledAt: verification.value.settledAt, expectedVersion: paymentExpectedVersion }
           );
           
           // Cache successful verification
@@ -904,9 +983,13 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         metrics.recordFunnelStage('payment_verified');
 
         syncNotifications(updatedInvoice);
+        // A late payment is still a success, but the client must be told:
+        // the funds arrived after the invoice was cancelled.
+        const lateCode = updatedInvoice.latePaymentWarningCode;
         sendSuccess(res, 200, updatedInvoice, {
           message: 'Payment verified on Stellar',
           correlationId: corrId,
+          ...(lateCode ? { code: lateCode, warning: LATE_PAYMENT_WARNINGS[lateCode] } : {}),
         });
       } catch (error: any) {
         const duration = performance.now() - start;
@@ -960,7 +1043,12 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           return sendFailure(res, 400, 'sellerPublicKey must be a valid Stellar public key');
         }
 
-        const stats = await storage.getInvoiceStats(sellerPublicKey as string);
+        // Owner-scoped: revenue figures belong to the seller (restored after #328).
+        if (!mayAccessSeller(req.actor, 'invoice:stats', sellerCheck.data)) {
+          return sendForbiddenOwnership(res);
+        }
+
+        const stats = await storage.getInvoiceStats(sellerCheck.data);
         const duration = performance.now() - start;
 
         metrics.recordOperation({

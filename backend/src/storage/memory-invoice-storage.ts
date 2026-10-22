@@ -2,7 +2,17 @@ import { InvoiceMemoryService } from '../services/invoice-memory.service';
 import { CreateInvoiceInput } from '../utils/validation';
 import type { InvoiceCursor } from './invoice-cursor';
 import type { InvoiceStats } from './invoice-stats';
-import type { InvoiceStorage, OverduePendingInvoices, PayerInfo, StoredInvoice } from './invoice-storage';
+import type {
+  AuditEvent as InvoiceAuditEvent,
+  CancelInvoiceOptionsInput,
+  InvoiceStatus,
+  MarkAsPaidOptionsInput,
+  InvoiceStorage,
+  OverduePendingInvoices,
+  PayerInfo,
+  StoredInvoice,
+} from './invoice-storage';
+import type { ReconciliationInvoice, ReconciliationSettlement } from '../domain/reconciliation';
 import { auditStore, AuditEvent, AuditFilter, AuditQueryResult } from '../audit/audit-service';
 import { recordAuditEvent } from '../audit/record-event';
 
@@ -47,8 +57,8 @@ export class MemoryInvoiceStorage implements InvoiceStorage {
     return this.service.getInvoicesBySeller(sellerPublicKey, status, limit, offset, after);
   }
 
-  async cancelInvoice(id: string, expectedVersion?: number): Promise<StoredInvoice> {
-    return this.service.cancelInvoice(id, expectedVersion);
+  async cancelInvoice(id: string, options?: CancelInvoiceOptionsInput): Promise<StoredInvoice> {
+    return this.service.cancelInvoice(id, options);
   }
 
   async markAsPaid(
@@ -56,9 +66,9 @@ export class MemoryInvoiceStorage implements InvoiceStorage {
     txHash: string,
     payerPublicKey: string,
     payerInfo?: PayerInfo,
-    expectedVersion?: number
+    options?: MarkAsPaidOptionsInput
   ): Promise<StoredInvoice> {
-    return this.service.markAsPaid(id, txHash, payerPublicKey, payerInfo, expectedVersion);
+    return this.service.markAsPaid(id, txHash, payerPublicKey, payerInfo, options);
   }
 
   async getInvoiceStats(sellerPublicKey: string): Promise<InvoiceStats[]> {
@@ -75,6 +85,35 @@ export class MemoryInvoiceStorage implements InvoiceStorage {
 
   async getAllInvoices(filter?: { status?: string }): Promise<StoredInvoice[]> {
     return this.service.getAllInvoices(filter);
+  }
+
+  async getAuditTrail(invoiceId: string): Promise<InvoiceAuditEvent[]> {
+    return this.service.getAuditTrail(invoiceId);
+  }
+
+  async listInvoicesForReconciliation(): Promise<ReconciliationInvoice[]> {
+    return this.service.listInvoicesForReconciliation();
+  }
+
+  async listAuditEvents(): Promise<InvoiceAuditEvent[]> {
+    return this.service.listAuditEvents();
+  }
+
+  async readInvoiceStats(sellerPublicKey: string): Promise<InvoiceStats[]> {
+    return this.service.readInvoiceStats(sellerPublicKey);
+  }
+
+  /** The memory backend records no settlement references apart from the invoices. */
+  async listSettlements(): Promise<ReconciliationSettlement[] | null> {
+    return null;
+  }
+
+  async countInvoices(): Promise<number> {
+    return this.service.countInvoices();
+  }
+
+  async purgeStaleInvoices(options: { maxAgeHours: number; statuses?: InvoiceStatus[] }): Promise<number> {
+    return this.service.purgeStaleInvoices(options);
   }
 
   async recordAuditEvent(event: Omit<AuditEvent, 'id' | 'timestamp'> & { timestamp?: string }): Promise<AuditEvent> {

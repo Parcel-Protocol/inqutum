@@ -19,7 +19,8 @@
  *    with bounded randomized jitter to avoid thundering herd reconnection storms.
  */
 
-import { Job, JobQueue, JobStore, EnqueueOptions, RetryPolicy, DEFAULT_RETRY_POLICY } from './job-types';
+import { Job, JobStore, EnqueueOptions, RetryPolicy, DEFAULT_RETRY_POLICY } from './job-types';
+import { JobQueue } from './worker';
 
 export type BackpressureState = 'NORMAL' | 'DEGRADED' | 'REJECTING';
 
@@ -131,8 +132,9 @@ export class BackpressureController {
     }
   }
 
+  /** Smallest depth at or above the high-watermark ratio (ceil: floor shed early on small queues). */
   get highWatermarkDepth(): number {
-    return Math.floor(this.config.maxQueueDepth * this.config.highWatermarkRatio);
+    return Math.ceil(this.config.maxQueueDepth * this.config.highWatermarkRatio);
   }
 
   get lowWatermarkDepth(): number {

@@ -96,6 +96,30 @@ export const DOMAIN_ERROR_TAXONOMY: Record<string, DomainErrorDefinition> = {
     userSafeMessage: VERIFICATION_MESSAGES.INVOICE_NOT_PENDING,
     recoveryAction: 'Only pending invoices can accept payment. Check invoice status on dashboard.',
   },
+  VERIFY_RATE_LIMIT_EXCEEDED: {
+    code: 'VERIFY_RATE_LIMIT_EXCEEDED',
+    category: 'RATE_LIMIT',
+    httpStatus: 429,
+    retryable: true,
+    userSafeMessage: VERIFICATION_MESSAGES.VERIFY_RATE_LIMIT_EXCEEDED,
+    recoveryAction: 'Too many verification attempts for this invoice. Wait a minute, then retry.',
+  },
+  TRANSACTION_CLOSE_TIME_UNAVAILABLE: {
+    code: 'TRANSACTION_CLOSE_TIME_UNAVAILABLE',
+    category: 'NETWORK',
+    httpStatus: 503,
+    retryable: true,
+    userSafeMessage: VERIFICATION_MESSAGES.TRANSACTION_CLOSE_TIME_UNAVAILABLE,
+    recoveryAction: 'The ledger close time is not available yet. Retry verification shortly.',
+  },
+  TX_HASH_ALREADY_USED: {
+    code: 'TX_HASH_ALREADY_USED',
+    category: 'SETTLEMENT',
+    httpStatus: 409,
+    retryable: false,
+    userSafeMessage: VERIFICATION_MESSAGES.TX_HASH_ALREADY_USED,
+    recoveryAction: 'This transaction already paid another invoice. Send a new payment for this invoice.',
+  },
   TRANSACTION_NOT_FOUND: {
     code: 'TRANSACTION_NOT_FOUND',
     category: 'NOT_FOUND',
@@ -241,6 +265,14 @@ export const DOMAIN_ERROR_TAXONOMY: Record<string, DomainErrorDefinition> = {
     retryable: true,
     userSafeMessage: 'Invoice was modified by another session. Please refresh and try again.',
     recoveryAction: 'Refresh the invoice to get the latest version, then retry the operation.',
+  },
+  SERVICE_UNAVAILABLE: {
+    code: 'SERVICE_UNAVAILABLE',
+    category: 'NETWORK',
+    httpStatus: 503,
+    retryable: true,
+    userSafeMessage: 'The service is temporarily unavailable.',
+    recoveryAction: 'Please retry shortly.',
   },
   INTERNAL_ERROR: {
     code: 'INTERNAL_ERROR',
@@ -388,5 +420,30 @@ export function buildUserSafeErrorResponse(
     ...(correlationId ? { correlationId } : {}),
     ...(error?.details ? { details: sanitizeObject(error.details) } : {}),
     timestamp: new Date().toISOString(),
+  };
+}
+
+/** HTTP status for a code; unknown codes are internal errors (500). */
+export function getErrorStatusCode(code: string): number {
+  return DOMAIN_ERROR_TAXONOMY[code]?.httpStatus ?? 500;
+}
+
+/** Whether retrying the same request may succeed. Unknown codes are not. */
+export function isRecoverableError(code: string): boolean {
+  return DOMAIN_ERROR_TAXONOMY[code]?.retryable ?? false;
+}
+
+/** A code and message as the flat shape callers log and return. */
+export function categorizeError(
+  code: string,
+  message: string
+): { code: string; message: string; category: ErrorCategory; statusCode: number; recoverable: boolean } {
+  const definition = DOMAIN_ERROR_TAXONOMY[code];
+  return {
+    code,
+    message,
+    category: definition?.category ?? 'INTERNAL',
+    statusCode: getErrorStatusCode(code),
+    recoverable: isRecoverableError(code),
   };
 }

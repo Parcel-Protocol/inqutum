@@ -8,7 +8,13 @@ import type { StoredInvoice } from '../storage/invoice-storage';
 import { compareNewestFirst, isAfterCursor, type InvoiceCursor } from '../storage/invoice-cursor';
 import type { InvoiceStats } from '../storage/invoice-stats';
 import type { ReconciliationInvoice } from '../domain/reconciliation';
-import type { MarkAsPaidOptions, PayerInfo } from '../storage/invoice-storage';
+import type {
+  AuditEvent,
+  CancelInvoiceOptionsInput,
+  InvoiceStatus,
+  MarkAsPaidOptionsInput,
+  PayerInfo,
+} from '../storage/invoice-storage';
 
 /**
  * How many times invoice creation re-draws a memo before giving up.
@@ -120,9 +126,9 @@ export class InvoiceMemoryService {
     txHash: string,
     payerPublicKey: string,
     payerInfo?: PayerInfo,
-    expectedVersion?: number
+    options?: MarkAsPaidOptionsInput
   ): Promise<StoredInvoice> {
-    const invoice = this.storage.markAsPaid(invoiceId, txHash, payerPublicKey, payerInfo, expectedVersion);
+    const invoice = this.storage.markAsPaid(invoiceId, txHash, payerPublicKey, payerInfo, options);
 
     if (!invoice) {
       throw new Error('Invoice not found');
@@ -151,14 +157,12 @@ export class InvoiceMemoryService {
     return invoices.slice(offset, offset + limit);
   }
 
-  async cancelInvoice(invoiceId: string, expectedVersion?: number): Promise<StoredInvoice> {
-    const invoice = this.storage.getInvoiceById(invoiceId);
-
-    if (!invoice || invoice.status !== 'PENDING') {
-      throw new Error('Invoice not found or already processed');
-    }
-
-    const updated = this.storage.updateInvoice(invoiceId, { status: 'CANCELLED' }, expectedVersion);
+  /**
+   * Delegates to the store's cancel so the lifecycle check, `cancelledAt` and
+   * the INVOICE_CANCELLED event apply here too (#328 had bypassed them).
+   */
+  async cancelInvoice(invoiceId: string, options?: CancelInvoiceOptionsInput): Promise<StoredInvoice> {
+    const updated = this.storage.cancelInvoice(invoiceId, options);
     if (!updated) {
       throw new Error('Invoice not found');
     }
@@ -180,6 +184,41 @@ export class InvoiceMemoryService {
 
   async getAllInvoices(filter?: { status?: string }): Promise<StoredInvoice[]> {
     return this.storage.getAllInvoices(filter);
+  }
+
+  // The wrappers below were dropped by #328 while their callers (payment
+  // monitor, audit route, reconciliation, retention) kept using them.
+
+  async logPaymentEvent(invoiceId: string, eventType: string, eventData: any): Promise<void> {
+    this.storage.logPaymentEvent(invoiceId, eventType, eventData);
+  }
+
+  async getAuditTrail(invoiceId: string): Promise<AuditEvent[]> {
+    return this.storage.getAuditTrail(invoiceId);
+  }
+
+  async listInvoicesForReconciliation(): Promise<ReconciliationInvoice[]> {
+    return this.storage.snapshotInvoices();
+  }
+
+  async listAuditEvents(): Promise<AuditEvent[]> {
+    return this.storage.snapshotAuditEvents();
+  }
+
+  async readInvoiceStats(sellerPublicKey: string): Promise<InvoiceStats[]> {
+    return [this.storage.readStats(sellerPublicKey)];
+  }
+
+  async getPaymentEvents(invoiceId?: string): Promise<MemoryPaymentEvent[]> {
+    return this.storage.getPaymentEvents(invoiceId);
+  }
+
+  async countInvoices(): Promise<number> {
+    return this.storage.countInvoices();
+  }
+
+  async purgeStaleInvoices(options: { maxAgeHours: number; statuses?: InvoiceStatus[] }): Promise<number> {
+    return this.storage.purgeStaleInvoices(options);
   }
 }
 

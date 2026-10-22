@@ -34,6 +34,7 @@ import {
   type RouteDescriptor,
 } from '../src/api/contract';
 import { DOMAIN_ERROR_TAXONOMY } from '../src/errors/error-taxonomy';
+import { walletAuth } from './fixtures/auth.fixture';
 
 const SELLER = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
 const DOC_PATH = path.join(__dirname, '../../docs/API_CONTRACTS.md');
@@ -100,8 +101,10 @@ function send(
   });
 }
 
+// Invoice writes and seller-scoped reads need the seller's wallet session
+// (docs/ACCESS-CONTROL.md), so probes act as SELLER unless they pass headers.
 const request = (method: string, urlPath: string, body?: unknown, headers?: Record<string, string>) =>
-  send(port, method, urlPath, body, headers);
+  send(port, method, urlPath, body, headers ?? walletAuth(SELLER));
 
 const adminRequest = (method: string, urlPath: string, body?: unknown, headers?: Record<string, string>) =>
   send(adminPort, method, urlPath, body, headers);
@@ -232,6 +235,7 @@ describe('API contract — response envelopes', () => {
       API_CONTRACT.filter((e) => e.responseKind === 'raw').map((e) => e.path).sort(),
       [
         '/',
+        '/api/admin/cutover-export',
         '/api/audit/export',
         '/api/exports/:id',
         '/api/health',
@@ -425,7 +429,7 @@ describe('API contract — admin auth', () => {
   it('documents auth for every endpoint', () => {
     for (const endpoint of API_CONTRACT) {
       assert.ok(
-        ['none', 'admin', 'hmac', 'public', 'maintainer'].includes(endpoint.auth),
+        ['none', 'admin', 'hmac', 'public', 'maintainer', 'token'].includes(endpoint.auth),
         `${endpoint.method} ${endpoint.path} has an unknown auth mode "${endpoint.auth}"`
       );
     }

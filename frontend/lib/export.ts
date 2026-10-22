@@ -1,4 +1,5 @@
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 import {
   assertPaymentProofAvailable,
   canExportPaymentProof,
@@ -15,13 +16,42 @@ import {
 } from './mailto-delivery.js';
 
 import {
+  buildQuittanceProof,
+  createQuittanceProofPdf,
+  isQuittanceProof,
+  renderQuittanceProofHtml,
+  type QuittanceProof,
+  type QuittanceProofResult,
+  QUITTANCE_PROOF_VERSION,
+} from './quittance-proof.ts';
+
+import {
   PRINT_DOCUMENT_CSP,
   buildMailtoUrl,
   csvCell,
   escapeHtml,
 } from './safe-content.js';
 
-export { assertPaymentProofAvailable, canExportPaymentProof };
+// Re-exported so callers (and tests/export.test.mjs) have one entry point for
+// proof and mail delivery. Restored from 26edbb8; #328 dropped them.
+export {
+  assertPaymentProofAvailable,
+  canExportPaymentProof,
+  buildInvoiceMailto,
+  buildProofMailto,
+  canSendInvoiceEmail,
+  canSendProofEmail,
+  getInvoiceMailtoRecipient,
+  getProofMailtoRecipient,
+  openInvoiceMailto,
+  openProofMailto,
+  buildQuittanceProof,
+  createQuittanceProofPdf,
+  isQuittanceProof,
+  renderQuittanceProofHtml,
+  QUITTANCE_PROOF_VERSION,
+};
+export type { QuittanceProof, QuittanceProofResult };
 export { escapeHtml };
 
 export interface Invoice {
@@ -160,10 +190,38 @@ export function downloadInvoiceCSV(invoices: Invoice[], filename?: string): void
 }
 
 /**
+ * Late-payment notice for the printed proof and the on-page receipt. Restored
+ * from a6fea13: a merge kept the calls in generateInvoicePDF and PaymentReceipt
+ * but dropped this helper and its markup, so both threw a ReferenceError.
+ */
+export function latePaymentWarning(
+  invoice: Pick<Invoice, 'latePaymentWarningCode'>
+): { title: string; body: string } | null {
+  if (invoice.latePaymentWarningCode === 'PAYMENT_RECEIVED_AFTER_CANCEL') {
+    return {
+      title: 'Payment received after cancellation',
+      body: 'This transaction proves funds reached the seller. Contact the seller to reconcile the payment.',
+    };
+  }
+  if (invoice.latePaymentWarningCode === 'PAYMENT_RECEIVED_AFTER_EXPIRY') {
+    return {
+      title: 'Payment received after invoice expiry',
+      body: 'This transaction proves funds reached the seller after the original payment window.',
+    };
+  }
+  return null;
+}
+
+/**
  * Generates standalone printable HTML for an invoice PDF.
  * Hardens boundary contracts for date tolerance, character escaping, and proof checks (issue #148).
  */
-export function generateInvoicePDF(invoice: Invoice): string {
+export function generateInvoicePDF(invoiceOrProof: Invoice | QuittanceProof): string {
+  // A canonical proof has its own renderer; only raw invoices use the template below.
+  if (isQuittanceProof(invoiceOrProof)) {
+    return renderQuittanceProofHtml(invoiceOrProof);
+  }
+  const invoice = invoiceOrProof as Invoice;
   if (!invoice || typeof invoice !== 'object') {
     throw new Error('Invoice object is required to generate PDF');
   }
@@ -354,6 +412,18 @@ export function generateInvoicePDF(invoice: Invoice): string {
       color: #92400e;
       line-height: 1.4;
     }
+    /* Names the details table for screen readers without changing the printed layout. */
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
   </style>
 </head>
 <body>
@@ -408,9 +478,12 @@ export function generateInvoicePDF(invoice: Invoice): string {
     <div class="amount-asset">${escapeHtml(invoice.assetCode || '')}</div>
   </div>
 
+  ${warning ? `<div class="late-warning" role="note"><p><strong>${escapeHtml(warning.title)}</strong></p><p>${escapeHtml(warning.body)}</p></div>` : ''}
+
   ${invoice.description ? `<div class="info-section" style="margin-bottom: 20px;"><h2>Description</h2><p style="color: #1f2937; line-height: 1.6;">${escapeHtml(invoice.description)}</p></div>` : ''}
 
   <table class="details-table">
+    <caption class="visually-hidden">Payment proof details</caption>
     <tr><th scope="row">Invoice ID</th><td style="font-family: monospace; font-size: 12px;">${escapeHtml(invoice.id)}</td></tr>
     <tr><th scope="row">Memo</th><td style="font-family: monospace;">${escapeHtml(invoice.memo)}</td></tr>
     <tr><th scope="row">Seller Address</th><td style="font-family: monospace; font-size: 11px; word-break: break-all;">${escapeHtml(invoice.sellerPublicKey)}</td></tr>
@@ -453,7 +526,12 @@ export function generateInvoicePDF(invoice: Invoice): string {
 </html>`;
 }
 
-export function openInvoicePDF(invoice: Invoice) {
+/** Print-ready HTML for a canonical quittance proof. */
+export function generateQuittanceProofPDF(proof: QuittanceProof): string {
+  return renderQuittanceProofHtml(proof);
+}
+
+export function openInvoicePDF(invoice: Invoice | QuittanceProof) {
   
   const triggerElement = document.activeElement as HTMLElement | null;
 
@@ -538,4 +616,12 @@ export function shareInvoiceByEmail(invoice: Invoice): void {
     throw new Error('Client email address is not valid');
   }
   window.location.href = mailtoLink;
+}
+
+/**
+ * Opens a mail draft with the payment proof link for the payer. Restored from
+ * 26edbb8: InvoiceCard and PaymentReceipt import it, and #328 dropped it.
+ */
+export function emailPaymentProof(invoice: Invoice, baseUrl?: string): string {
+  return openProofMailto(invoice, baseUrl);
 }

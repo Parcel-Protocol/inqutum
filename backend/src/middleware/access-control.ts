@@ -110,7 +110,7 @@ export function requirePermission(permission: Permission): PermissionGuard {
           : req.authFailure
             ? 'The credentials provided are invalid or have expired'
             : 'Authentication required';
-      return sendFailure(res, 401, reason, 'UNAUTHENTICATED');
+      return sendFailure(res, 401, reason, { code: 'UNAUTHENTICATED' });
     }
     return sendFailure(res, 403, 'Your role is not permitted to perform this action', 'FORBIDDEN', {
       permission,
@@ -138,5 +138,5 @@ export function mayAccessSeller(
 }
 
 export function sendForbiddenOwnership(res: Response): void {
-  sendFailure(res, 403, 'You can only act on your own invoices', 'FORBIDDEN');
+  sendFailure(res, 403, 'You can only act on your own invoices', { code: 'FORBIDDEN' });
 }
