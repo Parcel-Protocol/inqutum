@@ -36,6 +36,7 @@ import {
 import { NotificationService, notificationService } from '../notifications/notification-service';
 import { EmailService, emailService, EmailTemplateType } from '../services/email.service';
 import type { VerificationCode } from '../services/payment-verification';
+import { DegradedModeService, degradedModeService } from '../ops/degraded-mode.service';
 
 /** Kept explicit so clients can tune polling without duplicating backend policy. */
 export const PAYMENT_STATUS_POLL_INTERVAL_MS = 3000;
@@ -60,6 +61,8 @@ export interface InvoiceHandlerOptions {
   notifications?: NotificationService;
   /** Defaults to the process-wide email service. */
   emailService?: EmailService;
+  /** Degraded mode service for unavailable dependencies. */
+  degradedMode?: DegradedModeService;
 }
 
 export interface InvoiceHandlers {
@@ -110,6 +113,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
   const stellar: TransactionLookup = options.stellar || stellarService;
   const notifications = options.notifications ?? notificationService;
   const emails = options.emailService ?? emailService;
+  const degradedMode = options.degradedMode ?? degradedModeService;
 
   // Notifications are a side effect: a failure here must never fail the request.
   const safely = (label: string, fn: () => unknown) => {
@@ -163,6 +167,11 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
     async createInvoice(req: Request, res: Response) {
       const start = performance.now();
       const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
+
+      const degradedCheck = await degradedMode.checkCapability('invoice.create');
+      if (!degradedCheck.allowed && degradedCheck.fallback) {
+        return degradedMode.sendDegradedResponse(res, degradedCheck, corrId);
+      }
 
       try {
         const validatedData = createInvoiceSchema.parse(req.body);
@@ -222,6 +231,16 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           stellarQrCode: payment.stellarQrCode,
         });
       } catch (error: any) {
+        const dbFallback = degradedMode.classifyUpstreamError('postgres', 'invoice.create', error);
+        if (dbFallback) {
+          degradedMode.sendDegradedResponse(
+            res,
+            { capability: 'invoice.create', allowed: false, fallback: dbFallback },
+            corrId
+          );
+          return;
+        }
+
         const duration = performance.now() - start;
         logError('Create invoice error:', error);
         const classified = classifyError(error);
@@ -246,6 +265,11 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
     async getInvoice(req: Request, res: Response) {
       const start = performance.now();
       const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
+
+      const degradedCheck = await degradedMode.checkCapability('invoice.read');
+      if (!degradedCheck.allowed && degradedCheck.fallback) {
+        return degradedMode.sendDegradedResponse(res, degradedCheck, corrId);
+      }
 
       try {
         const invoice = await storage.getInvoiceById(req.params.id);
@@ -284,6 +308,16 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         }
         sendSuccess(res, 200, invoice);
       } catch (error: any) {
+        const dbFallback = degradedMode.classifyUpstreamError('postgres', 'invoice.read', error);
+        if (dbFallback) {
+          degradedMode.sendDegradedResponse(
+            res,
+            { capability: 'invoice.read', allowed: false, fallback: dbFallback },
+            corrId
+          );
+          return;
+        }
+
         const duration = performance.now() - start;
         logError('Get invoice error:', error);
         const classified = classifyError(error);
@@ -308,6 +342,11 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
     async getInvoices(req: Request, res: Response) {
       const start = performance.now();
       const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
+
+      const degradedCheck = await degradedMode.checkCapability('invoice.read');
+      if (!degradedCheck.allowed && degradedCheck.fallback) {
+        return degradedMode.sendDegradedResponse(res, degradedCheck, corrId);
+      }
 
       try {
         const { sellerPublicKey } = req.query;
@@ -388,6 +427,16 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           pagination: { limit, offset, total: invoices.length, nextCursor, hasMore },
         });
       } catch (error: any) {
+        const dbFallback = degradedMode.classifyUpstreamError('postgres', 'invoice.read', error);
+        if (dbFallback) {
+          degradedMode.sendDegradedResponse(
+            res,
+            { capability: 'invoice.read', allowed: false, fallback: dbFallback },
+            corrId
+          );
+          return;
+        }
+
         const duration = performance.now() - start;
         logError('Get invoices error:', error);
         const classified = classifyError(error);
@@ -560,6 +609,11 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
       const start = performance.now();
       const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
 
+      const degradedCheck = await degradedMode.checkCapability('payment.verify');
+      if (!degradedCheck.allowed && degradedCheck.fallback) {
+        return degradedMode.sendDegradedResponse(res, degradedCheck, corrId);
+      }
+
       const { id } = req.params;
       const releaseLock = await invoiceLockManager.acquire(id);
 
@@ -636,6 +690,18 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         try {
           txDetails = await stellar.getTransaction(hashCheck.value);
         } catch (error: any) {
+          const upstreamFallback = degradedMode.classifyUpstreamError('stellar_horizon', 'payment.verify', error);
+          if (upstreamFallback) {
+            logError(`Verify payment Horizon degradation detected (${upstreamFallback.code}):`, error);
+            degradedMode.recordFailure('stellar_horizon', error.message);
+            degradedMode.sendDegradedResponse(
+              res,
+              { capability: 'payment.verify', allowed: false, fallback: upstreamFallback },
+              corrId
+            );
+            return;
+          }
+
           logError('Verify payment lookup error:', error);
           const duration = performance.now() - start;
           metrics.recordOperation({
@@ -782,6 +848,16 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           correlationId: corrId,
         });
       } catch (error: any) {
+        const dbFallback = degradedMode.classifyUpstreamError('postgres', 'payment.verify', error);
+        if (dbFallback) {
+          degradedMode.sendDegradedResponse(
+            res,
+            { capability: 'payment.verify', allowed: false, fallback: dbFallback },
+            corrId
+          );
+          return;
+        }
+
         const duration = performance.now() - start;
 
         if (error instanceof ConflictError) {
@@ -1134,6 +1210,11 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
       const start = performance.now();
       const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
 
+      const degradedCheck = await degradedMode.checkCapability('notification.send');
+      if (!degradedCheck.allowed && degradedCheck.fallback) {
+        return degradedMode.sendDegradedResponse(res, degradedCheck, corrId);
+      }
+
       try {
         const { id } = req.params;
         const invoice = await storage.getInvoiceById(id);
@@ -1242,6 +1323,17 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
             correlationId: corrId,
           });
         }
+
+        const emailFallback = degradedMode.classifyUpstreamError('email_provider', 'notification.send', error);
+        if (emailFallback) {
+          degradedMode.sendDegradedResponse(
+            res,
+            { capability: 'notification.send', allowed: false, fallback: emailFallback },
+            corrId
+          );
+          return;
+        }
+
         logError('Send invoice email error:', error);
         sendFailure(res, 500, error.message || 'Failed to send invoice email', {
           correlationId: corrId,
