@@ -52,14 +52,21 @@ export default function InvoiceCard({ invoice }: InvoiceCardProps) {
     }
   };
 
-  const handleDownloadPDF = () => {
-    openInvoicePDF(invoice as any);
-    toast.success('Opening payment proof');
+  const reportExport = (result: ReturnType<typeof openInvoicePDF>, success: string) => {
+    if (result.ok) {
+      toast.success(success);
+      return;
+    }
+    toast.error(result.message, {
+      description: result.retryable ? result.recoveryAction : undefined,
+    });
   };
 
-  const handleEmailShare = () => {
-    shareInvoiceByEmail(invoice as any);
-  };
+  const handleDownloadPDF = () =>
+    reportExport(openInvoicePDF(invoice as any), 'Opening payment proof');
+
+  const handleEmailShare = () =>
+    reportExport(shareInvoiceByEmail(invoice as any), 'Opening email');
 
   return (
     <div className="card hover:shadow-xl group">

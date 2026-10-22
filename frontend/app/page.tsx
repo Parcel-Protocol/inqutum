@@ -229,8 +229,14 @@ export default function HomePage() {
                       <button
                         type="button"
                         onClick={() => {
-                          shareInvoiceByEmail(createdInvoice.invoice);
-                          toast.success('Opening email');
+                          const result = shareInvoiceByEmail(createdInvoice.invoice);
+                          if (result.ok) {
+                            toast.success('Opening email');
+                            return;
+                          }
+                          toast.error(result.message, {
+                            description: result.retryable ? result.recoveryAction : undefined,
+                          });
                         }}
                         className="btn btn-secondary"
                       >

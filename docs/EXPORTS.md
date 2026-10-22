@@ -65,3 +65,33 @@ POST /api/exports   { "requester": "G…", "format": "json|csv", "status": "PAID
   -> 201 { …metadata, downloadPath }
 GET  /api/exports/:id?requester=G…   -> file (Cache-Control: private, no-store)
 ```
+
+## Browser print and share actions
+
+The seller- and payer-facing actions live in `frontend/lib/export.ts`. They are
+read-only: they render the invoice record the page already loaded, never accept
+secret keys, never sign, and never write invoice state.
+
+| Action | Success code |
+| --- | --- |
+| `downloadInvoiceCSV` | `EXPORT_DOWNLOADED` |
+| `openInvoicePDF` | `EXPORT_OPENED` |
+| `shareInvoiceByEmail` | `EXPORT_SHARED` |
+
+Every failure returns `{ ok: false, code, message, category, retryable,
+recoveryAction, remediation }` instead of throwing; `generateInvoicePDF` keeps
+its throwing contract and raises an `ExportError` with the same metadata.
+
+| Code | Category | Retryable | Meaning |
+| --- | --- | --- | --- |
+| `INVALID_EXPORT_REQUEST` | VALIDATION | no | No usable invoice record (missing id or status) |
+| `EXPORT_PROOF_UNAVAILABLE` | LIFECYCLE | no | Proof requested for an invoice that is not `PAID` |
+| `INVALID_EXPORT_RECIPIENT` | VALIDATION | no | No client email, or one the mailto check rejects |
+| `EXPORT_POPUP_BLOCKED` | INTERNAL | yes | The print window was blocked |
+| `EXPORT_UNAVAILABLE` | INTERNAL | yes | No browser APIs (server render) |
+| `EXPORT_FAILED` | INTERNAL | yes | The download, pop-up write, or email hand-off failed |
+
+Codes, categories, `retryable`, `recoveryAction` and `remediation` follow the
+same taxonomy as `backend/src/errors/error-taxonomy.ts`. The CSV and proof stay
+byte-identical for the same invoice record, so a re-download is comparable with
+the copy a user already holds.
