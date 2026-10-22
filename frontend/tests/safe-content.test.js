@@ -138,6 +138,8 @@ test('csvCell handles non-finite numbers safely', () => {
 
 test('safeExternalUrl rejects bare TLD hostnames and non-strings', () => {
   assert.equal(safeExternalUrl('https://.com'), null);
+  assert.equal(safeExternalUrl('https://example..com'), null);
+  assert.equal(safeExternalUrl('https://example.com.'), null);
   assert.equal(safeExternalUrl(42), null);
   assert.equal(safeExternalUrl(null), null);
   assert.equal(safeExternalUrl(undefined), null);

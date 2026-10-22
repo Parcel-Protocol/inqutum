@@ -14,18 +14,21 @@ interface PaymentReceiptProps {
 }
 
 function PaymentReceipt({ invoice }: PaymentReceiptProps) {
-  const handleDownloadPDF = () => {
-    openInvoicePDF(invoice as any);
-    toast.success('Opening payment proof');
-  };
-
-  const handleEmailProof = () => {
-    if (!invoice.customerEmail) {
-      toast.error('No client email on this invoice');
+  const reportExport = (result: ReturnType<typeof openInvoicePDF>, success: string) => {
+    if (result.ok) {
+      toast.success(success);
       return;
     }
-    shareInvoiceByEmail(invoice as any);
+    toast.error(result.message, {
+      description: result.retryable ? result.recoveryAction : undefined,
+    });
   };
+
+  const handleDownloadPDF = () =>
+    reportExport(openInvoicePDF(invoice as any), 'Opening payment proof');
+
+  const handleEmailProof = () =>
+    reportExport(shareInvoiceByEmail(invoice as any), 'Opening email');
 
   const handleDownload = () => {
     const receiptText = `

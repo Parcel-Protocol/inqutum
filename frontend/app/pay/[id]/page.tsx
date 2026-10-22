@@ -54,14 +54,17 @@ export default function PaymentPage() {
   const copy = async (value: string, label: string) => {
     if (await copyToClipboard(value)) toast.success(`${label} copied`);
   };
-  const download = () => {
-    openInvoicePDF(invoice);
-    toast.success('Opening payment proof');
+  const reportExport = (result: ReturnType<typeof openInvoicePDF>, success: string) => {
+    if (result.ok) {
+      toast.success(success);
+      return;
+    }
+    toast.error(result.message, {
+      description: result.retryable ? result.recoveryAction : undefined,
+    });
   };
-  const email = () => {
-    if (!invoice.customerEmail) return toast.error('No client email on this invoice');
-    shareInvoiceByEmail(invoice);
-  };
+  const download = () => reportExport(openInvoicePDF(invoice), 'Opening payment proof');
+  const email = () => reportExport(shareInvoiceByEmail(invoice), 'Opening email');
 
   return (
     <main id="main-content" className="min-h-screen bg-logo-pattern relative py-8 sm:py-12 px-4">

@@ -138,8 +138,14 @@ export default function DashboardPage() {
       toast.error('No paid invoices to export');
       return;
     }
-    downloadInvoiceCSV(paidInvoices as any);
-    toast.success(`Exported ${paidInvoices.length} paid invoices to CSV`);
+    const result = downloadInvoiceCSV(paidInvoices as any);
+    if (result.ok) {
+      toast.success(`Exported ${paidInvoices.length} paid invoices to CSV`);
+      return;
+    }
+    toast.error(result.message, {
+      description: result.retryable ? result.recoveryAction : undefined,
+    });
   };
 
   return (
