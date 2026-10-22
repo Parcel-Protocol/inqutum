@@ -45,7 +45,9 @@ import {
   validateMatrix,
   type DependencyId,
   type DependencyProbe,
+  type Capability,
 } from '../ops/dependency-degradation';
+import { DegradedModeService, degradedModeService } from '../ops/degraded-mode.service';
 import {
   PartialFailureRetryCoordinator,
   buildDashboard,
@@ -196,6 +198,82 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
     try {
       const report = await runDependencyChecks(options.dependencyProbes ?? {});
       res.status(report.overall === 'down' ? 503 : 200).json({ success: report.overall !== 'down', data: report, correlationId: req.correlationId });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // -- Degraded mode & capability status -------------------------------------
+
+  router.get('/ops/degraded-mode/status', admin, async (req, res, next) => {
+    try {
+      const status = await degradedMode.getStatus({ forceRefresh: req.query.refresh === 'true' });
+      res.json({ success: true, data: status, correlationId: req.correlationId });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/ops/degraded-mode/overrides', admin, (req, res) => {
+    const { dependency, state, reason } = req.body ?? {};
+    if (!dependency || !state || !reason) {
+      return fail(res, req, 400, 'INVALID_OVERRIDE_PAYLOAD', 'dependency, state, and reason are required');
+    }
+
+    try {
+      const override = degradedMode.setOverride(dependency, state, String(reason), 'ops-admin');
+      auditStore.recordEvent({
+        action: 'MAINTAINER_ACTION',
+        actor: { type: 'maintainer', id: 'ops-admin' },
+        scope: { entityType: 'system', entityId: dependency },
+        reason: `Set manual degradation override: ${state} (${reason})`,
+        metadata: override,
+        correlationId: req.correlationId,
+      });
+
+      res.status(201).json({ success: true, data: override, correlationId: req.correlationId });
+    } catch (err: any) {
+      fail(res, req, 400, 'INVALID_DEPENDENCY', err.message);
+    }
+  });
+
+  router.delete('/ops/degraded-mode/overrides/:dependency', admin, (req, res) => {
+    const dep = req.params.dependency as DependencyId;
+    const cleared = degradedMode.clearOverride(dep);
+    if (!cleared) {
+      return fail(res, req, 404, 'OVERRIDE_NOT_FOUND', `No manual override found for ${dep}`);
+    }
+
+    auditStore.recordEvent({
+      action: 'MAINTAINER_ACTION',
+      actor: { type: 'maintainer', id: 'ops-admin' },
+      scope: { entityType: 'system', entityId: dep },
+      reason: `Cleared manual degradation override for ${dep}`,
+      metadata: { dependency: dep },
+      correlationId: req.correlationId,
+    });
+
+    res.json({ success: true, data: { cleared: true, dependency: dep }, correlationId: req.correlationId });
+  });
+
+  router.delete('/ops/degraded-mode/overrides', admin, (req, res) => {
+    degradedMode.clearAllOverrides();
+    auditStore.recordEvent({
+      action: 'MAINTAINER_ACTION',
+      actor: { type: 'maintainer', id: 'ops-admin' },
+      scope: { entityType: 'system', entityId: 'all' },
+      reason: 'Cleared all manual degradation overrides',
+      correlationId: req.correlationId,
+    });
+
+    res.json({ success: true, data: { clearedAll: true }, correlationId: req.correlationId });
+  });
+
+  router.get('/ops/degraded-mode/capabilities/:capability', admin, async (req, res, next) => {
+    try {
+      const cap = req.params.capability as Capability;
+      const decision = await degradedMode.checkCapability(cap);
+      res.json({ success: true, data: decision, correlationId: req.correlationId });
     } catch (err) {
       next(err);
     }
