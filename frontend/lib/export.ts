@@ -37,6 +37,222 @@ export interface Invoice {
 }
 
 /**
+ * Export contract (issue #173).
+ *
+ * This module is the last hop before a user keeps a copy of invoice or payment
+ * proof state, so its outcomes are explicit rather than incidental:
+ *
+ * - success: a browser action resolves to `{ ok: true, code }`;
+ * - validation: the record cannot produce a truthful export
+ *   (`INVALID_EXPORT_REQUEST`, `EXPORT_PROOF_UNAVAILABLE`,
+ *   `INVALID_EXPORT_RECIPIENT`);
+ * - retry: every failure carries `retryable`, `recoveryAction` and ordered
+ *   `remediation` steps, so the UI can offer a next step instead of a dead end;
+ * - degraded dependency: a missing or failing browser API (SSR, blocked pop-up,
+ *   failed download) returns a failure and never throws or silently no-ops.
+ *
+ * Codes and metadata follow the conventions shared by the MVP path
+ * (`lib/verification.js`, `lib/api-runtime.js`) and the persistent path
+ * (`backend/src/errors/error-taxonomy.ts`): UPPER_SNAKE codes, a category,
+ * `retryable`, `recoveryAction` and ordered `remediation` steps.
+ */
+export type ExportErrorCode =
+  | 'INVALID_EXPORT_REQUEST'
+  | 'EXPORT_PROOF_UNAVAILABLE'
+  | 'INVALID_EXPORT_RECIPIENT'
+  | 'EXPORT_POPUP_BLOCKED'
+  | 'EXPORT_UNAVAILABLE'
+  | 'EXPORT_FAILED';
+
+/** Backend taxonomy categories an export failure can fall into. */
+export type ExportErrorCategory = 'VALIDATION' | 'LIFECYCLE' | 'INTERNAL';
+
+export interface ExportErrorDefinition {
+  category: ExportErrorCategory;
+  retryable: boolean;
+  message: string;
+  recoveryAction: string;
+  remediation: string[];
+}
+
+/** Stable code metadata shared by thrown errors and returned failures. */
+export const EXPORT_ERRORS: Record<ExportErrorCode, ExportErrorDefinition> = {
+  INVALID_EXPORT_REQUEST: {
+    category: 'VALIDATION',
+    retryable: false,
+    message: 'Invoice object is required to generate PDF',
+    recoveryAction: 'Open the invoice again so a complete record is loaded, then retry the export.',
+    remediation: [
+      'Refresh the invoice so its id and status are loaded.',
+      'Retry the export from the invoice view, or share the invoice link instead.',
+    ],
+  },
+  EXPORT_PROOF_UNAVAILABLE: {
+    category: 'LIFECYCLE',
+    retryable: false,
+    message: 'Payment proof is available only after the invoice is paid',
+    recoveryAction:
+      'Share the payment link while the invoice is unpaid; download the proof once it is PAID.',
+    remediation: [
+      'Refresh the invoice to confirm its current status.',
+      'Share the payment link instead of a proof until the invoice is PAID.',
+      'Ask the seller for a new invoice if this one expired unpaid.',
+    ],
+  },
+  INVALID_EXPORT_RECIPIENT: {
+    category: 'VALIDATION',
+    retryable: false,
+    message: 'Client email address is not valid',
+    recoveryAction: 'Add a valid client email (name@domain.com) to the invoice, then retry the share.',
+    remediation: [
+      'Open the invoice and correct the client email.',
+      'Retry the email share, or copy the invoice link instead.',
+    ],
+  },
+  EXPORT_POPUP_BLOCKED: {
+    category: 'INTERNAL',
+    retryable: true,
+    message: 'Pop-up blocked. Please allow pop-ups to print payment proof.',
+    recoveryAction: 'Allow pop-ups for this site, then retry the download.',
+    remediation: [
+      'Check the browser address bar for a blocked pop-up notice.',
+      'Allow pop-ups for this site and retry the download.',
+      'If pop-ups stay blocked, share the invoice link or export the CSV instead.',
+    ],
+  },
+  EXPORT_UNAVAILABLE: {
+    category: 'INTERNAL',
+    retryable: true,
+    message: 'Export is only available in the browser.',
+    recoveryAction: 'Open the invoice or dashboard in a browser tab, then retry the export.',
+    remediation: [
+      'Open the export from the invoice page or dashboard in a browser tab.',
+      'Retry the export once the page is interactive.',
+    ],
+  },
+  EXPORT_FAILED: {
+    category: 'INTERNAL',
+    retryable: true,
+    message: 'Failed to generate payment proof PDF.',
+    recoveryAction: 'Retry the export; if it keeps failing, reload the page.',
+    remediation: [
+      'Retry the export once.',
+      'If it still fails, reload the page and retry.',
+      'Share the invoice link instead if the proof cannot be generated.',
+    ],
+  },
+};
+
+/** Typed error for export helpers that keep a throwing contract. */
+export class ExportError extends Error {
+  readonly code: ExportErrorCode;
+  readonly category: ExportErrorCategory;
+  readonly retryable: boolean;
+  readonly recoveryAction: string;
+  readonly remediation: string[];
+
+  constructor(
+    code: ExportErrorCode,
+    options: {
+      message?: string;
+      cause?: unknown;
+      retryable?: boolean;
+      recoveryAction?: string;
+      remediation?: string[];
+    } = {}
+  ) {
+    const definition = EXPORT_ERRORS[code];
+    super(
+      options.message || definition.message,
+      options.cause === undefined ? undefined : { cause: options.cause }
+    );
+    this.name = 'ExportError';
+    this.code = code;
+    this.category = definition.category;
+    this.retryable = options.retryable === undefined ? definition.retryable : options.retryable;
+    this.recoveryAction = options.recoveryAction || definition.recoveryAction;
+    this.remediation = options.remediation || definition.remediation;
+  }
+}
+
+/** Returned (never thrown) failure envelope for browser export actions. */
+export interface ExportFailure {
+  readonly ok: false;
+  readonly code: ExportErrorCode;
+  readonly message: string;
+  readonly category: ExportErrorCategory;
+  readonly retryable: boolean;
+  readonly recoveryAction: string;
+  readonly remediation: readonly string[];
+}
+
+export type ExportSuccessCode = 'EXPORT_OPENED' | 'EXPORT_DOWNLOADED' | 'EXPORT_SHARED';
+
+export interface ExportSuccess {
+  readonly ok: true;
+  readonly code: ExportSuccessCode;
+}
+
+export type ExportResult = ExportSuccess | ExportFailure;
+
+export function isExportError(error: unknown): error is ExportError {
+  return error instanceof ExportError;
+}
+
+/** Normalises any thrown value into the shared failure envelope. */
+export function toExportFailure(
+  error: unknown,
+  code: ExportErrorCode = 'EXPORT_FAILED',
+  message?: string
+): ExportFailure {
+  if (isExportError(error)) {
+    return {
+      ok: false,
+      code: error.code,
+      message: error.message,
+      category: error.category,
+      retryable: error.retryable,
+      recoveryAction: error.recoveryAction,
+      remediation: error.remediation,
+    };
+  }
+
+  const definition = EXPORT_ERRORS[code];
+  return {
+    ok: false,
+    code,
+    message: message || definition.message,
+    category: definition.category,
+    retryable: definition.retryable,
+    recoveryAction: definition.recoveryAction,
+    remediation: definition.remediation,
+  };
+}
+
+function exportFailure(code: ExportErrorCode, message?: string): ExportFailure {
+  return toExportFailure(null, code, message);
+}
+
+/** Requires the fields every export needs before it can describe an invoice. */
+function requireExportInvoice(invoice: unknown, message?: string): Invoice {
+  if (!invoice || typeof invoice !== 'object') {
+    throw new ExportError('INVALID_EXPORT_REQUEST', { message });
+  }
+  const candidate = invoice as Partial<Invoice>;
+  if (
+    typeof candidate.id !== 'string' ||
+    candidate.id.trim() === '' ||
+    typeof candidate.status !== 'string' ||
+    candidate.status.trim() === ''
+  ) {
+    throw new ExportError('INVALID_EXPORT_REQUEST', {
+      message: message || 'Invoice id and status are required to generate a payment proof',
+    });
+  }
+  return invoice as Invoice;
+}
+
+/**
  * Safely formats a date without throwing RangeError on invalid date values.
  *
  * @param value Date input (string, number, Date)
@@ -121,27 +337,47 @@ export function generateInvoiceCSV(invoices: Invoice[]): string {
 
 /**
  * Triggers a browser download of an invoice CSV file.
- * Safely guards against non-browser (SSR) environments.
+ *
+ * Never throws: a missing browser API or a failing download returns a retryable
+ * failure, and the object URL is revoked on every path.
  */
-export function downloadInvoiceCSV(invoices: Invoice[], filename?: string): void {
+export function downloadInvoiceCSV(invoices: Invoice[], filename?: string): ExportResult {
+  // Degraded dependency: without a browser there is nothing to click, but the
+  // caller still gets a retryable failure instead of a silent no-op.
   if (typeof window === 'undefined' || typeof document === 'undefined') {
-    return;
+    return exportFailure('EXPORT_UNAVAILABLE');
   }
 
-  const csv = generateInvoiceCSV(invoices);
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  const url = URL.createObjectURL(blob);
+  let url: string | null = null;
+  let link: HTMLAnchorElement | null = null;
 
-  const defaultFilename = `invoices-${safeFormatDate(new Date(), 'yyyy-MM-dd-HHmmss', 'export')}.csv`;
-  link.setAttribute('href', url);
-  link.setAttribute('download', filename || defaultFilename);
-  link.style.visibility = 'hidden';
+  try {
+    const csv = generateInvoiceCSV(invoices);
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    link = document.createElement('a');
+    url = URL.createObjectURL(blob);
 
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+    const defaultFilename = `invoices-${safeFormatDate(new Date(), 'yyyy-MM-dd-HHmmss', 'export')}.csv`;
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename || defaultFilename);
+    link.style.visibility = 'hidden';
+
+    document.body.appendChild(link);
+    link.click();
+
+    return { ok: true, code: 'EXPORT_DOWNLOADED' };
+  } catch (error) {
+    return toExportFailure(error, 'EXPORT_FAILED', 'Failed to generate CSV export.');
+  } finally {
+    try {
+      link?.parentNode?.removeChild(link);
+    } catch {
+      // Detaching the temporary link is best-effort and never changes the result.
+    }
+    if (url) {
+      URL.revokeObjectURL(url);
+    }
+  }
 }
 
 /**
@@ -149,18 +385,22 @@ export function downloadInvoiceCSV(invoices: Invoice[], filename?: string): void
  * Hardens boundary contracts for date tolerance, character escaping, and proof checks (issue #148).
  */
 export function generateInvoicePDF(invoice: Invoice): string {
-  if (!invoice || typeof invoice !== 'object') {
-    throw new Error('Invoice object is required to generate PDF');
-  }
+  requireExportInvoice(invoice);
 
-  assertPaymentProofAvailable(invoice);
+  try {
+    assertPaymentProofAvailable(invoice);
+  } catch (error) {
+    throw new ExportError('EXPORT_PROOF_UNAVAILABLE', {
+      message: error instanceof Error ? error.message : undefined,
+      cause: error,
+    });
+  }
   const network =
     process.env.NEXT_PUBLIC_STELLAR_NETWORK === 'TESTNET' ? 'Testnet' : 'Mainnet';
   const isPaid = invoice.status === 'PAID';
 
   const rawId = invoice.id || '';
   const displayId = rawId.substring(0, 8).toUpperCase();
-  const safeStatus = (invoice.status || '').toLowerCase();
   const createdDateStr = safeFormatDate(invoice.createdAt, 'MMM dd, yyyy', 'N/A');
   const expiresDateStr = safeFormatDate(invoice.expiresAt, 'MMM dd, yyyy', 'N/A');
   const paidDateStr = safeFormatDate(invoice.paidAt, 'MMM dd, yyyy HH:mm', 'N/A');
@@ -332,7 +572,7 @@ export function generateInvoicePDF(invoice: Invoice): string {
     <div class="logo">Quittance</div>
     <div class="invoice-title">
       <h1>INVOICE PROOF</h1>
-      <div class="invoice-number">#${escapeHtml(invoice.id.substring(0, 8).toUpperCase())}</div>
+      <div class="invoice-number">#${escapeHtml(displayId)}</div>
       <span class="status-badge status-${escapeHtml(invoice.status.toLowerCase())}" aria-label="Invoice Status: ${escapeHtml(invoice.status)}"> Status: ${escapeHtml(invoice.status)}</span>
     </div>
   </div>
@@ -424,89 +664,143 @@ export function generateInvoicePDF(invoice: Invoice): string {
 </html>`;
 }
 
-export function openInvoicePDF(invoice: Invoice) {
-  
-  const triggerElement = document.activeElement as HTMLElement | null;
+/**
+ * Opens the printable payment proof in a new window and triggers printing.
+ *
+ * Never throws: validation failures, a blocked pop-up and browser errors are
+ * returned as typed results, so the caller can show the message and, when
+ * `retryable` is true, offer a retry.
+ */
+export function openInvoicePDF(invoice: Invoice): ExportResult {
+  // Degraded dependency: no DOM means no print window to open.
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return exportFailure('EXPORT_UNAVAILABLE');
+  }
 
-  const toastId = toast.loading('Preparing payment proof for printing...');
+  const triggerElement = document.activeElement as HTMLElement | null;
+  const restoreFocus = () => {
+    try {
+      triggerElement?.focus();
+    } catch {
+      // Focus restoration is best-effort and must not mask the export result.
+    }
+  };
+
+  let pdfContent: string;
+  try {
+    pdfContent = generateInvoicePDF(invoice);
+  } catch (error) {
+    return toExportFailure(error);
+  }
+
+  let printWindow: Window | null = null;
+  try {
+    printWindow = window.open('', '_blank', 'width=800,height=600');
+  } catch (error) {
+    restoreFocus();
+    return toExportFailure(error);
+  }
+
+  if (!printWindow) {
+    restoreFocus();
+    return exportFailure('EXPORT_POPUP_BLOCKED');
+  }
 
   try {
-    const pdfContent = generateInvoicePDF(invoice);
-    const printWindow = window.open('', '_blank', 'width=800,height=600');
-
-    if (!printWindow) {
-      toast.error('Pop-up blocked. Please allow pop-ups to print payment proof.', { id: toastId });
-      triggerElement?.focus();
-      return;
-    }
-
     printWindow.document.write(pdfContent);
     printWindow.document.close();
 
     printWindow.onload = () => {
-      toast.success('Payment proof ready. Opening print dialog...', { id: toastId });
-
       setTimeout(() => {
-        printWindow.print();
-
-        printWindow.onafterprint = () => {
-          triggerElement?.focus();
-        };
-
-        setTimeout(() => {
-          triggerElement?.focus();
-        }, 1000);
+        try {
+          printWindow?.print();
+          if (printWindow) {
+            printWindow.onafterprint = restoreFocus;
+          }
+        } catch {
+          // A print dialog that cannot open leaves the proof readable; focus is
+          // still restored below and no invoice state changes.
+        }
+        setTimeout(restoreFocus, 1000);
       }, 500);
     };
-  } catch (err) {
-    toast.error('Failed to generate payment proof PDF.', { id: toastId });
-    triggerElement?.focus();
+  } catch (error) {
+    try {
+      printWindow.close();
+    } catch {
+      // A pop-up that cannot be closed is still a failed export.
+    }
+    restoreFocus();
+    return toExportFailure(error);
   }
 
-  return false;
+  return { ok: true, code: 'EXPORT_OPENED' };
 }
 
 /**
  * Opens the system email client to share an invoice link or payment proof.
+ *
+ * Never throws and never writes invoice state: an unpaid invoice shares the
+ * payment link, a paid invoice shares the verified payment facts. Validation
+ * failures are returned with a stable code and recovery guidance so the caller
+ * can keep offering the invoice link instead of dead-ending the user.
  */
-export function shareInvoiceByEmail(invoice: Invoice): void {
+export function shareInvoiceByEmail(invoice: Invoice): ExportResult {
+  // Degraded dependency: no window means no mail client to hand off to.
   if (typeof window === 'undefined') {
-    return;
+    return exportFailure('EXPORT_UNAVAILABLE');
   }
 
-  assertPaymentProofAvailable(invoice);
-  if (!invoice.customerEmail) {
-    throw new Error('Client email is required to send this invoice');
+  let record: Invoice;
+  try {
+    record = requireExportInvoice(invoice, 'Invoice object is required to send this invoice');
+  } catch (error) {
+    return toExportFailure(error);
   }
 
-  const rawId = invoice.id || '';
+  const recipient = typeof record.customerEmail === 'string' ? record.customerEmail.trim() : '';
+  if (!recipient) {
+    return exportFailure(
+      'INVALID_EXPORT_RECIPIENT',
+      'Client email is required to send this invoice'
+    );
+  }
+
+  const rawId = record.id || '';
   const displayId = rawId.substring(0, 8).toUpperCase();
-  const subject = `Invoice #${displayId} - ${invoice.amount} ${invoice.assetCode}`;
-  const isPaid = invoice.status === 'PAID';
+  const subject = `Invoice #${displayId} - ${record.amount} ${record.assetCode}`;
+  const isPaid = record.status === 'PAID';
 
   let body = `Invoice Details:\n`;
   body += `Invoice ID: ${rawId}\n`;
-  body += `Amount: ${invoice.amount} ${invoice.assetCode}\n`;
-  body += `Status: ${invoice.status}\n`;
+  body += `Amount: ${record.amount} ${record.assetCode}\n`;
+  body += `Status: ${record.status}\n`;
 
-  if (invoice.customerName) body += `Client: ${invoice.customerName}\n`;
-  if (invoice.description) body += `Description: ${invoice.description}\n`;
+  if (record.customerName) body += `Client: ${record.customerName}\n`;
+  if (record.description) body += `Description: ${record.description}\n`;
 
-  if (isPaid && invoice.paymentTxHash) {
+  if (isPaid && record.paymentTxHash) {
     body += `\nPayment Information:\n`;
-    body += `Payment Date: ${safeFormatDate(invoice.paidAt, 'PPpp', '')}\n`;
-    body += `Transaction Hash: ${invoice.paymentTxHash}\n`;
-    if (invoice.payerPublicKey) body += `Payer Address: ${invoice.payerPublicKey}\n`;
+    body += `Payment Date: ${safeFormatDate(record.paidAt, 'PPpp', '')}\n`;
+    body += `Transaction Hash: ${record.paymentTxHash}\n`;
+    if (record.payerPublicKey) body += `Payer Address: ${record.payerPublicKey}\n`;
     body += `Verified on Stellar Blockchain\n`;
   } else {
-    body += `\nQuittance: ${window.location.origin}/pay/${rawId}\n`;
+    body += `\nQuittance: ${window.location.origin}/pay/${encodeURIComponent(rawId)}\n`;
   }
 
   body += `\nPowered by Quittance`;
 
-  const mailtoLink = buildMailtoUrl(invoice.customerEmail, subject, body);
+  const mailtoLink = buildMailtoUrl(recipient, subject, body);
   if (!mailtoLink) {
-    throw new Error('Client email address is not valid');
+    return exportFailure('INVALID_EXPORT_RECIPIENT');
   }
-  window.location.href = mailtoLink;
+
+  try {
+    window.location.href = mailtoLink;
+  } catch (error) {
+    return toExportFailure(error, 'EXPORT_FAILED', 'Could not open the email client.');
+  }
+
+  return { ok: true, code: 'EXPORT_SHARED' };
 }

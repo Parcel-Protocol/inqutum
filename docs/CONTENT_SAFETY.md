@@ -47,5 +47,11 @@ injects inline scripts; a nonce-based CSP would be the follow-up.
 - Payer emails must now match the conservative pattern (previously any
   `x@y.z` without whitespace).
 - `getExplorerTransactionUrl` returns the explorer home for a malformed hash.
-- `shareInvoiceByEmail` throws `Client email address is not valid` for an
-  address that fails the mailto check.
+- The frontend export actions (`downloadInvoiceCSV`, `openInvoicePDF`,
+  `shareInvoiceByEmail` in `frontend/lib/export.ts`) no longer throw or no-op:
+  they return `{ ok: true, code }` or a failure envelope with `code`,
+  `category`, `retryable`, `recoveryAction` and `remediation`. An address that
+  fails the mailto check returns `INVALID_EXPORT_RECIPIENT` instead of throwing.
+- Sharing an unpaid invoice by email sends the payment link rather than the
+  `Payment proof is available only after the invoice is paid` error. Proof
+  download still requires `PAID`.
