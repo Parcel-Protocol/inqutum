@@ -41,7 +41,8 @@ function csvCell(value) {
 /**
  * Returns the URL if it is plain https, otherwise null.
  * Rejects: credentials, javascript:/data: schemes, whitespace, control chars,
- * backslashes, non-string inputs, bare TLD hostnames (#178).
+ * backslashes, non-string inputs, and bare or malformed hostnames such as
+ * `https://.com` or `https://example..com` (#178).
  */
 function safeExternalUrl(value) {
   if (typeof value !== 'string') return null;
@@ -50,7 +51,13 @@ function safeExternalUrl(value) {
   try {
     const url = new URL(raw);
     if (url.protocol !== 'https:' || url.username || url.password || !url.hostname) return null;
-    if (url.hostname.length < 3 || !url.hostname.includes('.')) return null;
+    const labels = url.hostname.split('.');
+    if (labels.length < 2) return null;
+    // Every label must be non-empty and start/end alphanumerically; the final
+    // label must look like a TLD. This rejects `.com`, `example..com` and
+    // `example.com.` while still accepting punycode labels.
+    if (labels.some((label) => !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label))) return null;
+    if (labels[labels.length - 1].length < 2) return null;
     return url.toString();
   } catch {
     return null;

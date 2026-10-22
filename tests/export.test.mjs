@@ -241,6 +241,75 @@ test('Issue #173 validation: proof export refuses unpaid and expired invoices wi
   );
 });
 
+test('Issue #173 validation: CSV export refuses a missing invoice list instead of writing a header-only file', () => {
+  const browser = installBrowser();
+
+  try {
+    for (const invoices of [null, undefined, {}, 'invoices']) {
+      const result = downloadInvoiceCSV(invoices, 'invoices.csv');
+
+      assert.equal(result.ok, false, String(invoices));
+      assert.equal(result.code, 'INVALID_EXPORT_REQUEST');
+      assert.equal(result.category, 'VALIDATION');
+      assert.equal(result.retryable, false);
+      assert.equal(result.message, 'Invoice list is required to export a CSV');
+      assert.ok(result.recoveryAction.length > 0);
+      assert.ok(result.remediation.length > 0);
+    }
+
+    assert.throws(
+      () => generateInvoiceCSV(null),
+      (error) => isExportError(error) && error.code === 'INVALID_EXPORT_REQUEST'
+    );
+
+    // Nothing reached the browser: no download was triggered for invalid input.
+    assert.equal(browser.calls.clicked, 0);
+    assert.deepEqual(browser.calls.blobs, []);
+  } finally {
+    browser.restore();
+  }
+});
+
+test('Issue #173 success: an empty invoice list exports the header row, not a failure', () => {
+  const browser = installBrowser();
+
+  try {
+    assert.deepEqual(downloadInvoiceCSV([], 'empty.csv'), {
+      ok: true,
+      code: 'EXPORT_DOWNLOADED',
+    });
+
+    const [contents] = browser.calls.blobs[0].parts;
+    assert.equal(contents.split('\n').length, 1);
+    assert.match(contents, /^\uFEFFInvoice ID,/);
+  } finally {
+    browser.restore();
+  }
+});
+
+test('Issue #173 validation: CSV skips corrupted rows but still exports usable records', () => {
+  const csv = generateInvoiceCSV([
+    null,
+    'not-an-invoice',
+    { ...PAID_INVOICE, id: 'inv-usable' },
+  ]);
+
+  const lines = csv.split('\n');
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /^Invoice ID,/);
+  assert.match(lines[1], /inv-usable/);
+});
+
+test('Issue #173 hardening: an invoice amount reaching the proof boundary is escaped', () => {
+  const html = generateInvoicePDF({
+    ...PAID_INVOICE,
+    amount: '<img src=x onerror=alert(1)>',
+  });
+
+  assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
+  assert.ok(!html.includes('<img src=x'));
+});
+
 test('Issue #173 validation: email share returns actionable failures and never throws', () => {
   const browser = installBrowser();
 

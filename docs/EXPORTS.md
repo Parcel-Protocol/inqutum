@@ -81,10 +81,15 @@ secret keys, never sign, and never write invoice state.
 Every failure returns `{ ok: false, code, message, category, retryable,
 recoveryAction, remediation }` instead of throwing; `generateInvoicePDF` keeps
 its throwing contract and raises an `ExportError` with the same metadata.
+`generateInvoiceCSV` is pure, but rejects a missing or non-array invoice list
+with `INVALID_EXPORT_REQUEST` instead of returning a header-only file that would
+imply every invoice was exported. An empty array is a valid export and produces
+the header row. Corrupted entries inside the array are skipped, so one bad
+record cannot block the rest of the file.
 
 | Code | Category | Retryable | Meaning |
 | --- | --- | --- | --- |
-| `INVALID_EXPORT_REQUEST` | VALIDATION | no | No usable invoice record (missing id or status) |
+| `INVALID_EXPORT_REQUEST` | VALIDATION | no | No usable invoice record (missing id or status), or a CSV export without an invoice list |
 | `EXPORT_PROOF_UNAVAILABLE` | LIFECYCLE | no | Proof requested for an invoice that is not `PAID` |
 | `INVALID_EXPORT_RECIPIENT` | VALIDATION | no | No client email, or one the mailto check rejects |
 | `EXPORT_POPUP_BLOCKED` | INTERNAL | yes | The print window was blocked |

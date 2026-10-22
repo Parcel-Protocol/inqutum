@@ -281,6 +281,10 @@ export function safeFormatDate(
 /**
  * Generates CSV content from an array of invoices with formula-injection protection
  * and resilient handling of missing or corrupted fields (issue #148).
+ *
+ * An empty list is a valid export (header row only), but a missing or non-array
+ * list is a caller error: returning a header-only file for it would silently
+ * misreport that every invoice had been exported (issue #173).
  */
 export function generateInvoiceCSV(invoices: Invoice[]): string {
   const headers = [
@@ -302,7 +306,13 @@ export function generateInvoiceCSV(invoices: Invoice[]): string {
     'Transaction Hash',
   ];
 
-  if (!Array.isArray(invoices) || invoices.length === 0) {
+  if (!Array.isArray(invoices)) {
+    throw new ExportError('INVALID_EXPORT_REQUEST', {
+      message: 'Invoice list is required to export a CSV',
+    });
+  }
+
+  if (invoices.length === 0) {
     return headers.join(',');
   }
 
@@ -615,7 +625,7 @@ export function generateInvoicePDF(invoice: Invoice): string {
 
   <div class="amount-section">
     <div class="amount-label">Amount ${isPaid ? 'Paid' : 'Due'}</div>
-    <div class="amount-value">${invoice.amount !== null && invoice.amount !== undefined ? invoice.amount : ''}</div>
+    <div class="amount-value">${escapeHtml(invoice.amount ?? '')}</div>
     <div class="amount-asset">${escapeHtml(invoice.assetCode || '')}</div>
   </div>
 
