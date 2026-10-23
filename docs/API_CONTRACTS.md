@@ -3,6 +3,7 @@
 Integration-facing HTTP contract for the Quittance/Inqutum backend.
 
 - **Contract version:** `1.1.0` (tracked in `CONTRACT_VERSION`, `backend/src/api/contract.ts`)
+- **Frontend component:** `frontend/components/QRCodeDisplay.tsx` renders payment QR codes from `GET /api/invoices/:id/payment-info`. Its contract is: a QR code is only shown for a payload that passed validation (non-empty asset, destination, memo and a positive amount); an empty or invalid payload renders a validation message with no QR image; a failed payload fetch shows a retryable error state with a retry action; and a degraded dependency (QR generator unavailable) falls back to displaying the raw payment string so the user always has a safe recovery path. Regression tests live beside the component.
 - **Enforced by:** `backend/tests/api-contract.test.ts`, which runs in CI
 - **Base path:** `/api`
 
