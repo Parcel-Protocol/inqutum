@@ -7,6 +7,22 @@
  *  - Generates operator-visible evidence with severity ratings and repair recommendations.
  *  - Supports both immediate healing and asynchronous job queuing.
  *  - Idempotent and safe to run repeatedly in production.
+ *
+ * Bounded cache with explicit invalidation and stale detection:
+ *  - BoundedProjectionCache is an LRU-style cache with a hard maximum entry count.
+ *  - Entries are stamped with the storage version they were derived from. An entry is
+ *    stale when its recorded version no longer matches the current storage version.
+ *  - invalidate(key) and invalidateAll() provide explicit invalidation; stale entries
+ *    are never returned by get() and are evicted on access.
+ *  - Failures in a loader are not cached; retries re-invoke the loader.
+ *
+ * Operational edge cases / recovery:
+ *  - Capacity overflow evicts least-recently-used entries; eviction never affects
+ *    authoritative storage, so rollback is simply clearing the cache.
+ *  - Repair is driven by the search index, which is derived from storage. If a repair
+ *    fails midway, rerunning detect()/repair() converges to the same state.
+ *  - Authorization: stale detection and repair operate on the ADMIN view only; callers
+ *    without an ADMIN role must not invoke these services (enforced by the caller).
  */
 
 import type { StoredInvoice, InvoiceStorage } from '../storage/invoice-storage';
@@ -77,6 +93,82 @@ export interface RepairExecutionEvidence {
   repairedItemIds: string[];
   operatorEvidenceLog: string[];
   remainingAnomalies: number;
+}
+
+/**
+ * Bounded cache with explicit invalidation and stale detection.
+ *
+ * Entries carry the storage version they were derived from. A version mismatch marks
+ * the entry stale: it is evicted and reported as a miss, never served.
+ */
+export class BoundedProjectionCache<K, V> {
+  private readonly entries = new Map<K, { value: V; version: number }>();
+
+  constructor(private readonly maxEntries: number) {
+    if (!Number.isInteger(maxEntries) || maxEntries <= 0) {
+      throw new RangeError('maxEntries must be a positive integer');
+    }
+  }
+
+  get size(): number {
+    return this.entries.size;
+  }
+
+  /**
+   * Returns the cached value only if it matches currentVersion. Stale entries are evicted.
+   */
+  get(key: K, currentVersion: number): V | undefined {
+    const entry = this.entries.get(key);
+    if (!entry) return undefined;
+    if (entry.version !== currentVersion) {
+      this.entries.delete(key);
+      return undefined;
+    }
+    // refresh LRU position
+    this.entries.delete(key);
+    this.entries.set(key, entry);
+    return entry.value;
+  }
+
+  set(key: K, value: V, version: number): void {
+    if (this.entries.has(key)) {
+      this.entries.delete(key);
+    } else {
+      while (this.entries.size >= this.maxEntries) {
+        const oldest = this.entries.keys().next().value as K;
+        this.entries.delete(oldest);
+      }
+    }
+    this.entries.set(key, { value, version });
+  }
+
+  /**
+   * Loads through the cache. Loader failures are propagated and nothing is cached,
+   * so a retry re-invokes the loader.
+   */
+  async getOrLoad(key: K, currentVersion: number, loader: () => Promise<V>): Promise<V> {
+    const hit = this.get(key, currentVersion);
+    if (hit !== undefined) return hit;
+    const value = await loader();
+    this.set(key, value, currentVersion);
+    return value;
+  }
+
+  /** Explicitly invalidates a single key. Returns true if an entry was removed. */
+  invalidate(key: K): boolean {
+    return this.entries.delete(key);
+  }
+
+  /** Explicitly invalidates all entries. */
+  invalidateAll(): void {
+    this.entries.clear();
+  }
+
+  /** Reports whether a key is present but stale for currentVersion, without evicting it. */
+  isStale(key: K, currentVersion: number): boolean {
+    const entry = this.entries.get(key);
+    return entry !== undefined && entry.version !== currentVersion;
+  }
 }
 
 export class StaleProjectionService {
@@ -244,7 +336,6 @@ export class StaleProjectionService {
     const mode = options.mode ?? 'immediate';
     const storageInvoices = storage.getAllInvoices ? await storage.getAllInvoices() : [];
     const operatorLog: string[] = [];
-    const repairedIds: string[] = [];
 
     if (mode === 'queued') {
       operatorLog.push(`Queued background reconciliation job for ${storageInvoices.length} storage records.`);
