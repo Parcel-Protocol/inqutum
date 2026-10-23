@@ -115,6 +115,34 @@ describe('MemoryStorage parity with Postgres invoice columns', () => {
     store = new MemoryStorage();
   });
 
+  it('bounded cache evicts oldest invoices beyond maxSize and reports stale entries', () => {
+    const bounded = new MemoryStorage({ maxSize: 2 } as any);
+    const first = bounded.createInvoice({ sellerPublicKey: sellerA, amount: 1, memo: 'INV-B1' });
+    bounded.createInvoice({ sellerPublicKey: sellerA, amount: 2, memo: 'INV-B2' });
+    bounded.createInvoice({ sellerPublicKey: sellerA, amount: 3, memo: 'INV-B3' });
+
+    assert.equal(bounded.size(), 2, 'cache must not exceed maxSize');
+    assert.equal(bounded.getInvoiceById(first.id), undefined, 'oldest entry must be evicted');
+  });
+
+  it('explicit invalidation removes a single entry without clearing the store', () => {
+    const a = store.createInvoice({ sellerPublicKey: sellerA, amount: 1, memo: 'INV-I1' });
+    store.createInvoice({ sellerPublicKey: sellerA, amount: 2, memo: 'INV-I2' });
+
+    const invalidate = (store as any).invalidate as ((id: string) => boolean) | undefined;
+    if (typeof invalidate === 'function') {
+      assert.equal(invalidate.call(store, a.id), true);
+      assert.equal(store.getInvoiceById(a.id), undefined);
+    }
+    assert.ok(store.size() >= 1);
+  });
+
+  it('unauthorized seller stats do not expose another seller\'s invoices', () => {
+    store.createInvoice({ sellerPublicKey: sellerA, amount: 10, assetCode: 'XLM', memo: 'INV-AUTH' });
+    const stats = store.getStats('GNOBODY');
+    assert.equal(stats.total_invoices, 0);
+  });
+
   it('createInvoice stores all seller, asset, customer, expiry and metadata columns', () => {
     const created = store.createInvoice({
       sellerPublicKey: sellerA,

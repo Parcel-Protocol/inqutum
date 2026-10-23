@@ -2,6 +2,27 @@
 // (createdAt ms, id) — id breaks ties so the order is total and a cursor
 // always points between two exact rows, regardless of inserts or status
 // changes happening while a client pages.
+//
+// Bounded cache with explicit invalidation and stale detection
+// --------------------------------------------------------------
+// `InvoiceCursorCache` memoizes decoded cursors so hot pagination paths do not
+// repeatedly base64/regex-parse the same opaque token. The cache is:
+//   - bounded: at most `maxEntries` entries; least-recently-used entries are
+//     evicted first (Map insertion order is used as the LRU queue);
+//   - explicitly invalidatable: `invalidate(key)` / `clear()` drop entries, and
+//     `invalidateBefore(ms)` drops every entry whose cursor createdAt is older
+//     than a watermark (used when a backend reindexes or a retention job runs);
+//   - stale-aware: each entry records the time it was stored. Entries older than
+//     `ttlMs` are treated as stale: `get` returns undefined, removes the entry,
+//     and increments the `staleEvictions` counter so operators can observe it.
+//
+// Failure/authorization behaviour: the cache stores only successfully decoded
+// cursors. Invalid tokens are never cached (so a malformed or forged value
+// cannot pin memory), and the cache does not make authorization decisions —
+// callers must still scope queries to the requesting tenant after decoding.
+// Retry: `decodeInvoiceCursor` is pure and idempotent, so retries are safe.
+// Rollback: the cache is an optional layer; `decodeInvoiceCursor` remains the
+// source of truth and can be called directly by disabling the cache instance.
 
 export interface InvoiceCursor {
   /** createdAt truncated to milliseconds (Postgres compares at the same precision). */
@@ -84,6 +105,141 @@ export function validateInvoiceCursor(value: unknown): CursorValidationResult {
     };
   }
   return { valid: true, cursor };
+}
+
+export interface InvoiceCursorCacheOptions {
+  /** Maximum number of decoded cursors retained. Must be a positive integer. */
+  maxEntries: number;
+  /** Entries older than this many milliseconds are stale and are not served. */
+  ttlMs: number;
+  /** Clock injection for deterministic tests. */
+  now?: () => number;
+}
+
+export interface InvoiceCursorCacheStats {
+  size: number;
+  hits: number;
+  misses: number;
+  staleEvictions: number;
+  capacityEvictions: number;
+}
+
+interface CacheEntry {
+  cursor: InvoiceCursor;
+  storedAt: number;
+}
+
+/**
+ * Bounded LRU cache of decoded invoice cursors with TTL-based stale detection
+ * and explicit invalidation. Only successfully decoded cursors are stored.
+ */
+export class InvoiceCursorCache {
+  private readonly entries = new Map<string, CacheEntry>();
+  private readonly maxEntries: number;
+  private readonly ttlMs: number;
+  private readonly now: () => number;
+  private hits = 0;
+  private misses = 0;
+  private staleEvictions = 0;
+  private capacityEvictions = 0;
+
+  constructor(options: InvoiceCursorCacheOptions) {
+    if (!Number.isInteger(options.maxEntries) || options.maxEntries <= 0) {
+      throw new RangeError('InvoiceCursorCache: maxEntries must be a positive integer');
+    }
+    if (!Number.isFinite(options.ttlMs) || options.ttlMs < 0) {
+      throw new RangeError('InvoiceCursorCache: ttlMs must be a non-negative finite number');
+    }
+    this.maxEntries = options.maxEntries;
+    this.ttlMs = options.ttlMs;
+    this.now = options.now ?? (() => Date.now());
+  }
+
+  /**
+   * Decodes a cursor string, serving from cache when a fresh entry exists.
+   * Invalid input returns null and is never cached.
+   */
+  decode(value: unknown): InvoiceCursor | null {
+    if (typeof value !== 'string') return null;
+    const key = value.trim();
+
+    const cached = this.getFresh(key);
+    if (cached) return cached;
+
+    const cursor = decodeInvoiceCursor(value);
+    if (!cursor) return null;
+
+    this.store(key, cursor);
+    return cursor;
+  }
+
+  /** Removes a single cached token. Returns true if an entry was removed. */
+  invalidate(value: string): boolean {
+    return this.entries.delete(value.trim());
+  }
+
+  /**
+   * Removes every entry whose cursor position is strictly older than the
+   * watermark (epoch ms). Used when rows older than the watermark are purged or
+   * reindexed and cursors pointing at them must not be trusted from cache.
+   */
+  invalidateBefore(watermarkMs: number): number {
+    let removed = 0;
+    for (const [key, entry] of this.entries) {
+      if (entry.cursor.createdAt.getTime() < watermarkMs) {
+        this.entries.delete(key);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  /** Drops all entries. Counters are preserved for observability. */
+  clear(): void {
+    this.entries.clear();
+  }
+
+  stats(): InvoiceCursorCacheStats {
+    return {
+      size: this.entries.size,
+      hits: this.hits,
+      misses: this.misses,
+      staleEvictions: this.staleEvictions,
+      capacityEvictions: this.capacityEvictions,
+    };
+  }
+
+  private getFresh(key: string): InvoiceCursor | null {
+    const entry = this.entries.get(key);
+    if (!entry) {
+      this.misses++;
+      return null;
+    }
+    if (this.now() - entry.storedAt > this.ttlMs) {
+      this.entries.delete(key);
+      this.staleEvictions++;
+      this.misses++;
+      return null;
+    }
+    // Refresh LRU position.
+    this.entries.delete(key);
+    this.entries.set(key, entry);
+    this.hits++;
+    return entry.cursor;
+  }
+
+  private store(key: string, cursor: InvoiceCursor): void {
+    if (this.entries.has(key)) {
+      this.entries.delete(key);
+    }
+    this.entries.set(key, { cursor, storedAt: this.now() });
+    while (this.entries.size > this.maxEntries) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest === undefined) break;
+      this.entries.delete(oldest);
+      this.capacityEvictions++;
+    }
+  }
 }
 
 /** Newest first, then id descending — the one ordering every backend uses. */
