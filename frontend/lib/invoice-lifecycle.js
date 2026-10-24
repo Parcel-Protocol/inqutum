@@ -17,13 +17,19 @@ function expiryTimestamp(expiresAt) {
     return null;
   }
 
+  if (typeof expiresAt === 'boolean') return null;
+
   // Handle epoch seconds vs milliseconds if passed as number
   if (typeof expiresAt === 'number') {
     if (!Number.isFinite(expiresAt) || expiresAt <= 0) return null;
     return expiresAt < 1e11 ? Math.floor(expiresAt * 1000) : Math.floor(expiresAt);
   }
 
+  if (Array.isArray(expiresAt)) return null;
+
   // Handle Date instance or date string
+  if (typeof expiresAt === 'object' && !(expiresAt instanceof Date)) return null;
+
   try {
     const parsed = new Date(expiresAt).getTime();
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
@@ -40,14 +46,17 @@ function expiryTimestamp(expiresAt) {
  * @returns {number}
  */
 function normalizeNow(now) {
-  if (now === undefined || now === null) {
+  if (now === undefined || now === null || typeof now === 'boolean') {
     return Date.now();
   }
   if (typeof now === 'number' && Number.isFinite(now)) {
     return now;
   }
-  const parsed = new Date(now).getTime();
-  return Number.isFinite(parsed) ? parsed : Date.now();
+  if (typeof now === 'string' || now instanceof Date) {
+    const parsed = new Date(now).getTime();
+    return Number.isFinite(parsed) ? parsed : Date.now();
+  }
+  return Date.now();
 }
 
 /**
@@ -163,6 +172,7 @@ function isActionableInvoice(invoice, now = Date.now()) {
 
 module.exports = {
   expiryTimestamp,
+  normalizeNow,
   hasInvoiceExpired,
   effectiveInvoiceStatus,
   applyExpiryStatus,

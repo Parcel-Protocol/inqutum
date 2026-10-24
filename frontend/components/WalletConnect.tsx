@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { 
-  checkWalletConnection, 
-  requestWalletAccess, 
+import {
+  checkWalletConnection,
+  requestWalletAccess,
   getUserPublicKey,
   getAccountBalance,
   describeStellarNetworkError,
@@ -11,6 +11,7 @@ import {
 import { useWalletStore } from '@/lib/store';
 import { EXTERNAL_WINDOW_FEATURES, explorerAccountUrl } from '@/lib/safe-content.js';
 import { paymentMonitor } from '@/lib/payment-monitor';
+import { resolveXlmBalance, classifyBalanceError, safeBalanceFallback, balanceErrorToast } from '@/lib/wallet-connect-contract';
 import { Wallet, LogOut, Loader2, ExternalLink, Bell, BellOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatAddress } from '@/lib/utils';
@@ -41,20 +42,14 @@ export default function WalletConnect({ onConnect }: WalletConnectProps = {}) {
   const loadBalance = async (key: string) => {
     try {
       const balances = await getAccountBalance(key);
-      const xlmBalance = balances.find(b => b.assetCode === 'XLM');
-      const balanceStr = xlmBalance ? parseFloat(xlmBalance.balance).toFixed(2) : '0.00';
+      const balanceStr = resolveXlmBalance(balances);
       setWallet(key, balanceStr);
     } catch (error: any) {
-      if (error.message?.includes('Not Found') || error.response?.status === 404) {
-        setWallet(key, '0.00');
-        toast.warning('Account needs funding');
-      } else {
-        // Wallet identity is still usable even if Horizon balance lookup is down.
-        setWallet(key, '—');
-        toast.warning('Wallet connected; balance unavailable', {
-          description: describeStellarNetworkError(error),
-        });
-      }
+      const errorCode = classifyBalanceError(error);
+      const fallback = safeBalanceFallback(errorCode);
+      setWallet(key, fallback);
+      const toastMeta = balanceErrorToast(errorCode, describeStellarNetworkError, error);
+      toast.warning(toastMeta.message, { description: toastMeta.description });
     }
   };
 
