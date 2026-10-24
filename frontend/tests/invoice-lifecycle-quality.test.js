@@ -162,3 +162,100 @@ test('Issue #150: isActionableInvoice checks payment eligibility', () => {
     false
   );
 });
+
+// ─── Issue #175: Harden invoice lifecycle contract ───────────────────────────
+
+const { normalizeNow } = require('../lib/invoice-lifecycle');
+
+test('Issue #175: expiryTimestamp rejects boolean inputs', () => {
+  assert.equal(expiryTimestamp(true), null);
+  assert.equal(expiryTimestamp(false), null);
+});
+
+test('Issue #175: expiryTimestamp rejects array inputs', () => {
+  assert.equal(expiryTimestamp([BASE_TIME]), null);
+  assert.equal(expiryTimestamp([]), null);
+  assert.equal(expiryTimestamp([ISO_STR]), null);
+});
+
+test('Issue #175: expiryTimestamp rejects plain objects', () => {
+  assert.equal(expiryTimestamp({}), null);
+  assert.equal(expiryTimestamp({ valueOf: () => BASE_TIME }), null);
+  assert.equal(expiryTimestamp({ toString: () => ISO_STR }), null);
+});
+
+test('Issue #175: expiryTimestamp preserves valid Date instances', () => {
+  const d = new Date(BASE_TIME);
+  assert.equal(expiryTimestamp(d), BASE_TIME);
+});
+
+test('Issue #175: expiryTimestamp handles Infinity and negative Infinity', () => {
+  assert.equal(expiryTimestamp(Infinity), null);
+  assert.equal(expiryTimestamp(-Infinity), null);
+});
+
+test('Issue #175: normalizeNow rejects boolean and falls back to Date.now()', () => {
+  const before = Date.now();
+  const resultTrue = normalizeNow(true);
+  const resultFalse = normalizeNow(false);
+  const after = Date.now();
+  assert.ok(resultTrue >= before && resultTrue <= after);
+  assert.ok(resultFalse >= before && resultFalse <= after);
+});
+
+test('Issue #175: normalizeNow accepts valid numeric and string inputs', () => {
+  assert.equal(normalizeNow(BASE_TIME), BASE_TIME);
+  assert.equal(normalizeNow(ISO_STR), BASE_TIME);
+  assert.equal(normalizeNow(new Date(BASE_TIME)), BASE_TIME);
+});
+
+test('Issue #175: normalizeNow falls back for non-date objects', () => {
+  const before = Date.now();
+  const result = normalizeNow({});
+  const after = Date.now();
+  assert.ok(result >= before && result <= after);
+});
+
+test('Issue #175: hasInvoiceExpired rejects arrays and functions as invoice', () => {
+  assert.equal(hasInvoiceExpired([], BASE_TIME), false);
+  assert.equal(hasInvoiceExpired(() => {}, BASE_TIME), false);
+});
+
+test('Issue #175: isActionableInvoice treats whitespace-only txHash as absent', () => {
+  assert.equal(
+    isActionableInvoice(
+      { status: 'PENDING', expiresAt: new Date(BASE_TIME + 10000).toISOString(), paymentTxHash: '   ' },
+      BASE_TIME
+    ),
+    true
+  );
+  assert.equal(
+    isActionableInvoice(
+      { status: 'PENDING', expiresAt: new Date(BASE_TIME + 10000).toISOString(), paymentTxHash: '' },
+      BASE_TIME
+    ),
+    true
+  );
+});
+
+test('Issue #175: applyExpiryLifecycle handles sparse and mixed-type arrays', () => {
+  const result = applyExpiryLifecycle([null, undefined, 42, 'string'], BASE_TIME);
+  assert.equal(result.length, 4);
+  assert.equal(result[0], null);
+  assert.equal(result[1], undefined);
+  assert.equal(result[2], 42);
+  assert.equal(result[3], 'string');
+});
+
+test('Issue #175: applyExpiryStatus returns original reference for non-PENDING statuses', () => {
+  const paid = { id: 'p1', status: 'PAID', expiresAt: new Date(BASE_TIME - 5000).toISOString() };
+  const cancelled = { id: 'c1', status: 'CANCELLED', expiresAt: new Date(BASE_TIME - 5000).toISOString() };
+  assert.equal(applyExpiryStatus(paid, BASE_TIME), paid);
+  assert.equal(applyExpiryStatus(cancelled, BASE_TIME), cancelled);
+});
+
+test('Issue #175: effectiveInvoiceStatus returns undefined for non-objects', () => {
+  assert.equal(effectiveInvoiceStatus(undefined), undefined);
+  assert.equal(effectiveInvoiceStatus('string'), undefined);
+  assert.equal(effectiveInvoiceStatus(42), undefined);
+});

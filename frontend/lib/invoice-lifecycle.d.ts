@@ -4,7 +4,8 @@ export interface InvoiceLifecycleInput {
   paymentTxHash?: string | null;
 }
 
-export function expiryTimestamp(expiresAt?: string | Date): number | null;
+export function expiryTimestamp(expiresAt?: string | number | Date | null): number | null;
+export function normalizeNow(now?: string | number | Date | null): number;
 export function hasInvoiceExpired(invoice?: InvoiceLifecycleInput | null, now?: string | number | Date): boolean;
 export function effectiveInvoiceStatus(invoice?: InvoiceLifecycleInput | null, now?: string | number | Date): string | undefined;
 export function applyExpiryStatus<T extends InvoiceLifecycleInput>(invoice: T, now?: string | number | Date): T;

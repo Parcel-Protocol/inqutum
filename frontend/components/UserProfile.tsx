@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { User, LogOut, Wallet, ChevronDown } from 'lucide-react';
 import { useWalletStore } from '@/lib/store';
 import { Boundary } from './Boundary';
+import { isDisplayableWallet, truncateWalletAddress, safeDisconnect } from '@/lib/user-profile-contract';
 
 interface UserProfileProps {
   userWallet: string | null;
@@ -28,11 +29,24 @@ function UserProfile({ userWallet, onDisconnect }: UserProfileProps) {
     };
   }, []);
 
-  if (!userWallet) {
+  const handleKeyDown = useCallback((event: KeyboardEvent) => {
+    if (event.key === 'Escape' && isOpen) {
+      setIsOpen(false);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleKeyDown]);
+
+  if (!isDisplayableWallet(userWallet)) {
     return null;
   }
 
-  const shortAddress = `${userWallet.substring(0, 6)}...${userWallet.substring(userWallet.length - 4)}`;
+  const shortAddress = truncateWalletAddress(userWallet!, 6, 4);
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -73,8 +87,7 @@ function UserProfile({ userWallet, onDisconnect }: UserProfileProps) {
           <div className="border-t border-gray-100 pt-2">
             <button
               onClick={() => {
-                disconnect();
-                if (onDisconnect) onDisconnect();
+                safeDisconnect(disconnect, onDisconnect);
                 setIsOpen(false);
               }}
               className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
