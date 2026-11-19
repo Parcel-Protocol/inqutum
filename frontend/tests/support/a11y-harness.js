@@ -72,6 +72,7 @@ export { default as PaymentButton } from '@/components/PaymentButton';
 export { default as QRCodeDisplay } from '@/components/QRCodeDisplay';
 export { default as WalletConnect } from '@/components/WalletConnect';
 export { default as UserProfile } from '@/components/UserProfile';
+export { default as PartialFailureDashboard } from '@/components/PartialFailureDashboard';
 `;
 
 let cachedBundle = null;

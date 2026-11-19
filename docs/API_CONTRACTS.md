@@ -156,6 +156,8 @@ cursor. These semantics are pinned by
 | `GET` | `/api/audit/export` | none | 200, 500 | Stream a full audit export as a downloadable document. |
 | `GET` | `/api/metrics` | none | 200 | Prometheus exposition format. |
 | `GET` | `/api/observability/metrics` | none | 200 | JSON metrics: counters, latencies and error rates. |
+| `GET` | `/api/observability/sampling` | maintainer | 200, 401, 403 | Current telemetry sampling policy and counts. |
+| `PUT` | `/api/observability/sampling` | maintainer | 200, 400, 401, 403 | Update the telemetry sampling policy. |
 | `GET` | `/api/notifications` | none | 200, 400 | Notifications for a recipient wallet, paginated. |
 | `GET` | `/api/notifications/unread-count` | none | 200 | Unread notification count for a recipient wallet. |
 | `POST` | `/api/notifications/:id/read` | none | 200, 404 | Mark one notification read. |
@@ -183,6 +185,12 @@ cursor. These semantics are pinned by
 | `GET` | `/api/risk/counterparty/:subjectId` | public | 200, 401 | Safe risk summary, without scores, factors, signals or thresholds. |
 | `POST` | `/api/auth/session` | none | 200, 400, 401, 429, 503 | Exchange a signed wallet challenge for a session token (Postgres server). |
 | `GET` | `/api/auth/me` | none | 200 | Who the presented credential resolves to, and its permissions. |
+| `POST` | `/api/auth/logout` | none | 200, 401, 503 | Revoke the presented session token. |
+| `POST` | `/api/auth/revoke` | none | 200, 400, 401, 403, 503 | Revoke all sessions for a wallet. |
+| `POST` | `/api/merge-reviews/detect` | none | 200, 400, 401, 403 | Queue duplicate invoices for merge review (Postgres server). |
+| `GET` | `/api/merge-reviews` | none | 200, 401, 403 | List merge reviews, scoped by seller. |
+| `POST` | `/api/merge-reviews/:id/approve` | none | 200, 401, 403, 404, 409 | Approve a pending merge review. |
+| `POST` | `/api/merge-reviews/:id/reject` | none | 200, 401, 403, 404, 409 | Reject a pending merge review. |
 | `GET` | `/api/auth/roles` | none | 200 | The role and permission table (`shared/access-control.ts`). |
 | `POST` | `/api/fees/quote` | none | 200, 400 | Quote the platform fee for an amount and asset. |
 
@@ -232,6 +240,11 @@ cursor. These semantics are pinned by
 | `POST` | `/api/ops/capabilities` | `admin` | 201, 400, 401, 403 | Issue an expiring, single-use capability token for one sensitive action on one target. |
 | `GET` | `/api/ops/config` | `admin` | 200, 401, 403 | Effective runtime configuration, its version and the source of each value. |
 | `PUT` | `/api/ops/config/feature-flags/:flag` | `admin` + capability | 200, 400, 401, 403, 404, 409, 503 | Set or clear a feature-flag override. Writes audit evidence first. |
+| `POST` | `/api/ops/rollouts` | `admin` + capability | 201, 400, 401, 403, 404, 409, 429, 503 | Start a guarded feature-flag rollout ([ROLLOUT_GUARD.md](ROLLOUT_GUARD.md)). |
+| `GET` | `/api/ops/rollouts` | `admin` | 200, 401, 403 | List rollouts and those needing attention. |
+| `GET` | `/api/ops/rollouts/:id` | `admin` | 200, 401, 403, 404 | One rollout with its rollback verification. |
+| `POST` | `/api/ops/rollouts/:id/evaluate` | `admin` | 200, 401, 403, 404 | One health reading: watch, promote, or roll back and verify. |
+| `POST` | `/api/ops/rollouts/:id/rollback` | `admin` + capability | 200, 400, 401, 403, 404, 409 | Roll back now; idempotent. |
 | `GET` | `/api/ops/dependencies/matrix` | `admin` | 200, 401, 403 | External dependency degradation matrix and its validation problems. |
 | `GET` | `/api/ops/dependencies` | `admin` | 200, 401, 403, 503 | Probe every external dependency. 503 when the overall state is down. |
 | `GET` | `/api/ops/partial-failures` | `admin` | 200, 400, 401, 403 | Partial-failure dashboard over background jobs, filterable. |

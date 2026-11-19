@@ -16,6 +16,7 @@ import { evaluatePolicyDryRun, parsePolicyDryRunRequest, PolicyDryRunError } fro
 import { loadPolicy } from '../domain/policy';
 import { CapabilityError, CapabilityTokenService, capabilityServiceFromEnv } from '../security/capability-tokens';
 import { AdminConfigError, AdminConfigService, adminConfig } from '../config/admin-config';
+import { RolloutGuard, RolloutGuardError, metricsSignalSource } from '../ops/rollout-guard';
 import { staleProjectionService } from '../ops/stale-projections.service';
 import { defaultSearchIndex } from '../services/search-index.service';
 import { SyntheticJourneyMonitor } from '../ops/synthetic-journey-monitor';
@@ -99,6 +100,8 @@ export interface OpsRouterOptions {
   capabilities?: CapabilityTokenService | null;
   /** Audited runtime configuration. Defaults to the process instance. */
   adminConfig?: AdminConfigService;
+  /** Feature-flag rollout guard (#256). Defaults to one over the process config and metrics. */
+  rollouts?: RolloutGuard;
   /** Search-index event replay (#290). Defaults to the live index and audit trail. */
   replay?: ProjectionReplayService;
   /** Resumable record repair service for orphaned and inconsistent records. */
@@ -205,6 +208,7 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
   const retries = options.jobs ? new PartialFailureRetryCoordinator(options.jobs) : null;
   const capabilities = options.capabilities === undefined ? capabilityServiceFromEnv() : options.capabilities;
   const config = options.adminConfig ?? adminConfig;
+  const rollouts = options.rollouts ?? new RolloutGuard({ config, signals: metricsSignalSource(metrics) });
   const risk = options.risk ?? counterpartyRiskService;
   const snapshots = options.snapshots ?? complianceSnapshotStore;
   const replay =
@@ -338,6 +342,7 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
     err instanceof ApprovalError ||
     err instanceof CapabilityError ||
     err instanceof AdminConfigError ||
+    err instanceof RolloutGuardError ||
     err instanceof PolicyDryRunError ||
     err instanceof FreezeWindowError ||
     err instanceof CounterpartyRiskError ||
@@ -791,6 +796,77 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
           })
       );
       res.json({ success: true, data: result, correlationId: req.correlationId });
+    } catch (err) {
+      knownError(req, res, err, next);
+    }
+  });
+
+  // -- Feature-flag rollout guard (#256) --------------------------------------
+
+  router.post('/ops/rollouts', admin, needCapabilities, async (req, res, next) => {
+    try {
+      const flag = String(req.body?.flag ?? '');
+      const rollout = await capabilities!.use(
+        req.header('x-capability-token'),
+        { action: 'rollout.start', target: flag },
+        (claims) =>
+          rollouts.start({
+            flag,
+            reason: req.body?.reason,
+            thresholds: req.body?.thresholds,
+            scope: req.body?.scope,
+            actorId: claims.subject,
+            capabilityId: claims.id,
+            correlationId: req.correlationId,
+          })
+      );
+      res.status(201).json({ success: true, data: rollout, correlationId: req.correlationId });
+    } catch (err) {
+      knownError(req, res, err, next);
+    }
+  });
+
+  router.get('/ops/rollouts', admin, (req, res) => {
+    const state = typeof req.query.state === 'string' ? req.query.state : undefined;
+    const flag = typeof req.query.flag === 'string' ? req.query.flag : undefined;
+    res.json({
+      success: true,
+      data: { rollouts: rollouts.list({ state: state as any, flag }), needsAttention: rollouts.needsAttention().map((r) => r.id) },
+      correlationId: req.correlationId,
+    });
+  });
+
+  router.get('/ops/rollouts/:id', admin, (req, res, next) => {
+    try {
+      res.json({ success: true, data: rollouts.inspect(req.params.id), correlationId: req.correlationId });
+    } catch (err) {
+      knownError(req, res, err, next);
+    }
+  });
+
+  /** Takes one health reading and promotes, keeps watching, or rolls back. Safe to call on a timer. */
+  router.post('/ops/rollouts/:id/evaluate', admin, async (req, res, next) => {
+    try {
+      res.json({ success: true, data: await rollouts.evaluate(req.params.id), correlationId: req.correlationId });
+    } catch (err) {
+      knownError(req, res, err, next);
+    }
+  });
+
+  router.post('/ops/rollouts/:id/rollback', admin, needCapabilities, async (req, res, next) => {
+    try {
+      const rollout = await capabilities!.use(
+        req.header('x-capability-token'),
+        { action: 'rollout.rollback', target: req.params.id },
+        (claims) =>
+          rollouts.rollback(req.params.id, {
+            reason: req.body?.reason,
+            actorId: claims.subject,
+            capabilityId: claims.id,
+            correlationId: req.correlationId,
+          })
+      );
+      res.json({ success: true, data: rollout, correlationId: req.correlationId });
     } catch (err) {
       knownError(req, res, err, next);
     }
