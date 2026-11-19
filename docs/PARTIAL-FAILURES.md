@@ -57,3 +57,64 @@ settle the invoice through the normal verify path; see
 ```bash
 cd backend && node --import tsx --test tests/partial-failures.test.ts
 ```
+
+## Operator dashboard UI (#383)
+
+`/ops/failures` in the frontend is the screen for the API above. It is for
+operators only: it asks for the admin bearer token (`JOBS_ADMIN_TOKEN`) and shows
+nothing until the API accepts it.
+
+| Piece | File |
+|-------|------|
+| Page | `frontend/app/ops/failures/page.tsx` |
+| Component | `frontend/components/PartialFailureDashboard.tsx` |
+| API client and view model | `frontend/lib/ops-failures.ts` |
+
+What an operator can do:
+
+- See unresolved failures, most urgent first, with a summary (unresolved,
+  critical, retryable, needs the user).
+- Filter by severity, operation, stale, retryable and needs-the-user. Each change
+  re-queries the API; the server does the filtering.
+- Open **Details** for the classified cause and the redacted error history.
+- **Retry** a failure a retry can help. A failure only the user can fix (bad
+  recipient, underpayment, wrong asset, memo mismatch, opt-out) shows what the
+  user must do instead of a Retry button.
+
+### Authorization
+
+- The token is held in component memory only. It is never stored, put in a URL,
+  rendered or logged; the field is a password input; **Sign out** and any `401`
+  clear it and return to the sign-in form.
+- `403 JOBS_ADMIN_DISABLED` is reported as "not enabled on this deployment", not
+  as a bad token.
+- Hiding Retry is a courtesy, not the control. The server still answers `422` for
+  a user-action failure and `409` for a job that is not dead-lettered or is
+  already running, and the screen shows that reason and refreshes the list.
+- If `NEXT_PUBLIC_API_URL` is missing or invalid the page shows the configuration
+  error instead of sending the token to a placeholder host.
+
+### Retry and failure behaviour
+
+| Situation | Behaviour |
+|-----------|-----------|
+| Double click on Retry | One request. The button is `aria-disabled` while it runs |
+| Network error or 5xx on retry | Outcome unknown, so the same `Idempotency-Key` is kept. Pressing Retry again replays it and the server answers `duplicate` instead of requeueing twice |
+| `409`, `404`, `422` on retry | A definitive answer: the key is dropped, the reason is shown, the list refreshes |
+| List fails to load | Alert with the reason and **Try again**. Nothing was changed |
+| Slow response arrives after a newer one or a sign-out | Ignored |
+| Server sends markup in an error message | Rendered as text. Messages are also clipped to 300 characters |
+
+### Recovery
+
+If the list shows a failure that will not clear: open **Details** for the history,
+fix the cause (or contact the user if it is marked), then **Retry**. If the screen
+itself cannot load, the same data is available from
+`GET /api/ops/partial-failures` with the admin token.
+
+### Compatibility
+
+Additive: one route, one component, one client module. The API, schemas and
+existing screens are unchanged. Tests: `frontend/tests/ops-failures.test.js` and
+`frontend/tests/partial-failure-dashboard.test.js` (which also runs axe over each
+state).
