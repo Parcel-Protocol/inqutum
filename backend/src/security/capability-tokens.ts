@@ -47,6 +47,16 @@ export const SENSITIVE_ACTIONS = {
     defaultTtlMs: 5 * 60_000,
     maxTtlMs: 15 * 60_000,
   },
+  'rollout.start': {
+    description: 'Start a guarded feature-flag rollout (target: flag name)',
+    defaultTtlMs: 5 * 60_000,
+    maxTtlMs: 15 * 60_000,
+  },
+  'rollout.rollback': {
+    description: 'Roll back a guarded feature-flag rollout (target: rollout id)',
+    defaultTtlMs: 5 * 60_000,
+    maxTtlMs: 15 * 60_000,
+  },
 } as const satisfies Record<string, SensitiveActionSpec>;
 
 export type SensitiveAction = keyof typeof SENSITIVE_ACTIONS;

@@ -240,6 +240,11 @@ cursor. These semantics are pinned by
 | `POST` | `/api/ops/capabilities` | `admin` | 201, 400, 401, 403 | Issue an expiring, single-use capability token for one sensitive action on one target. |
 | `GET` | `/api/ops/config` | `admin` | 200, 401, 403 | Effective runtime configuration, its version and the source of each value. |
 | `PUT` | `/api/ops/config/feature-flags/:flag` | `admin` + capability | 200, 400, 401, 403, 404, 409, 503 | Set or clear a feature-flag override. Writes audit evidence first. |
+| `POST` | `/api/ops/rollouts` | `admin` + capability | 201, 400, 401, 403, 404, 409, 429, 503 | Start a guarded feature-flag rollout ([ROLLOUT_GUARD.md](ROLLOUT_GUARD.md)). |
+| `GET` | `/api/ops/rollouts` | `admin` | 200, 401, 403 | List rollouts and those needing attention. |
+| `GET` | `/api/ops/rollouts/:id` | `admin` | 200, 401, 403, 404 | One rollout with its rollback verification. |
+| `POST` | `/api/ops/rollouts/:id/evaluate` | `admin` | 200, 401, 403, 404 | One health reading: watch, promote, or roll back and verify. |
+| `POST` | `/api/ops/rollouts/:id/rollback` | `admin` + capability | 200, 400, 401, 403, 404, 409 | Roll back now; idempotent. |
 | `GET` | `/api/ops/dependencies/matrix` | `admin` | 200, 401, 403 | External dependency degradation matrix and its validation problems. |
 | `GET` | `/api/ops/dependencies` | `admin` | 200, 401, 403, 503 | Probe every external dependency. 503 when the overall state is down. |
 | `GET` | `/api/ops/partial-failures` | `admin` | 200, 400, 401, 403 | Partial-failure dashboard over background jobs, filterable. |

@@ -54,6 +54,11 @@ restart the service. Confirm `features.paymentAmountTolerance` is `false` on
 settled under the tolerance stay `PAID`. Their `paymentTxHash` points to the
 exact on-chain amount on Horizon.
 
+## Guarded rollouts
+
+To stage a flag with automatic monitoring and a verified rollback instead of
+flipping it by hand, use the rollout guard: [ROLLOUT_GUARD.md](ROLLOUT_GUARD.md).
+
 ## Adding a flag
 
 1. Add an entry to `FEATURE_FLAGS` with a `safeDefault` that keeps today's
