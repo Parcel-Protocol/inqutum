@@ -114,3 +114,91 @@ export function transformForRead(
 export function transformForWrite<T extends Record<string, unknown>>(input: T): T & { _schemaVersion: SchemaVersion } {
   return { ...input, _schemaVersion: CURRENT_SCHEMA_VERSION };
 }
+
+/**
+ * Returns true only when writes are permitted for the given schema version.
+ * Deprecated versions are read-only and cannot be written.
+ */
+export function isWriteAllowed(version: SchemaVersion): boolean {
+  return DEPRECATION_POLICY.supported.versions.includes(version);
+}
+
+export class UnauthorizedSchemaOperationError extends Error {
+  readonly code = 'UNAUTHORIZED_SCHEMA_OPERATION';
+
+  constructor(message = 'Actor is not authorized to perform schema compatibility verification') {
+    super(message);
+    this.name = 'UnauthorizedSchemaOperationError';
+  }
+}
+
+export interface SchemaCompatibilityError {
+  index: number;
+  code: string;
+  error: string;
+}
+
+export interface SchemaCompatibilityReport {
+  total: number;
+  compatible: number;
+  upgraded: number;
+  failed: number;
+  errors: SchemaCompatibilityError[];
+}
+
+const AUTHORIZED_SCHEMA_ROLES = new Set(['admin', 'maintainer', 'ops']);
+
+/**
+ * Validates a batch of versioned or legacy records against the read compatibility chain.
+ */
+export function validateSchemaCompatibilityBatch(
+  records: Array<Record<string, unknown>>,
+  options: {
+    requireAuthorization?: boolean;
+    actor?: { role?: string; authorized?: boolean };
+  } = {}
+): SchemaCompatibilityReport {
+  if (options.requireAuthorization) {
+    const actor = options.actor;
+    const ok = Boolean(
+      actor && (actor.authorized === true || (actor.role && AUTHORIZED_SCHEMA_ROLES.has(actor.role)))
+    );
+    if (!ok) {
+      throw new UnauthorizedSchemaOperationError();
+    }
+  }
+
+  let compatible = 0;
+  let upgraded = 0;
+  const errors: SchemaCompatibilityError[] = [];
+
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
+    try {
+      const legacy = isLegacyRecord(record);
+      const normalized = transformForRead(record);
+      if (normalized._schemaVersion !== CURRENT_SCHEMA_VERSION) {
+        throw new Error(`Normalized version mismatch: ${normalized._schemaVersion}`);
+      }
+      if (legacy) {
+        upgraded += 1;
+      } else {
+        compatible += 1;
+      }
+    } catch (err: any) {
+      errors.push({
+        index: i,
+        code: typeof err?.code === 'string' ? err.code : 'SCHEMA_COMPATIBILITY_ERROR',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return {
+    total: records.length,
+    compatible,
+    upgraded,
+    failed: errors.length,
+    errors,
+  };
+}

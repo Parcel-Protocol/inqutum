@@ -870,11 +870,18 @@ export function createOpsRouter(options: OpsRouterOptions): Router {
     }
   });
 
-  // Synthetic journey monitor for critical workflow (Issue #264)
+  // Synthetic journey monitor for critical workflow (Issue #264 / #369)
   router.post('/ops/synthetic-journey/run', admin, async (req, res, next) => {
     try {
-      const monitor = new SyntheticJourneyMonitor({ storage: options.storage });
-      const report = await monitor.runJourney();
+      const rawRetries = req.body?.maxRetries;
+      const rawDelay = req.body?.retryDelayMs;
+      const maxRetries = typeof rawRetries === 'number' ? Math.min(3, Math.max(0, Math.floor(rawRetries))) : 0;
+      const retryDelayMs = typeof rawDelay === 'number' ? Math.min(2000, Math.max(0, Math.floor(rawDelay))) : 0;
+      const monitor = new SyntheticJourneyMonitor({ storage: options.storage, maxRetries, retryDelayMs });
+      const report = await monitor.runJourney({
+        requireAuthorization: true,
+        actor: { id: 'ops-admin', role: 'admin', authorized: true },
+      });
       res.status(report.success ? 200 : 503).json({ success: report.success, data: report, correlationId: req.correlationId });
     } catch (err) {
       next(err);

@@ -78,6 +78,16 @@ Response:
 - **Dependency Blame**: `SETTLEMENT_ENGINE`.
 - **Operator Action**: Inspect settlement worker concurrency settings and verify lease renewal intervals.
 
-### 3. Data Isolation Guarantee
+### 3. Data Isolation & Cleanup / Rollback Guarantee
 - Synthetic journeys use distinct `SYNTH-` memo prefixes and isolate entities.
 - Production analytics and financial totals filter synthetic records to prevent accounting pollution.
+- Every journey executes cleanup (`deleteInvoice`) in a `finally` block so synthetic invoices are removed even when a mid-journey step fails; cleanup errors never mask the diagnostic journey report.
+
+### 4. Retry & Transient Fault Recovery (#369)
+- `SyntheticJourneyMonitor` accepts `maxRetries` (default `0`; clamped `0..3` on the HTTP ops endpoint) and `retryDelayMs` (default `0`; clamped `0..2000` on HTTP).
+- Each step tracks `attempts`, and recovered steps are listed in `report.retriedSteps`.
+- If retries are exhausted, the step fails with `status: 'FAIL'`, `attempts: maxRetries + 1`, and its `blamedDependency` and `remediation` preserved.
+
+### 5. Authorization
+- `POST /api/ops/synthetic-journey/run` requires a valid `Authorization: Bearer <JOBS_ADMIN_TOKEN>` header (`401` when missing or invalid).
+- Programmatic callers can set `requireAuthorization: true` and pass `actor: { role: 'admin' | 'maintainer' | 'ops' }` (or `authorized: true`); unauthorized actors fail with `UnauthorizedSyntheticRunError` (`UNAUTHORIZED_SYNTHETIC_RUN`).

@@ -65,6 +65,7 @@ export { INVOICE_FORM_ERROR_SUMMARY_ID, invoiceFormErrorSummary } from '@/compon
 export { default as ApiErrorState } from '@/components/ApiErrorState';
 export { default as InvoiceCard } from '@/components/InvoiceCard';
 export { default as PaymentStatus } from '@/components/PaymentStatus';
+export { default as PayStatusRegion } from '@/components/PayStatusRegion';
 export { default as PaymentReceipt } from '@/components/PaymentReceipt';
 export { default as PaymentResultPanel } from '@/components/PaymentResultPanel';
 export { default as PaymentButton } from '@/components/PaymentButton';

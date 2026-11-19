@@ -61,9 +61,15 @@ structured error — this signals that a data migration is required.
 4. Add tests for the new transform in `backend/tests/schema-versioning.test.ts`.
 5. Update this document.
 
+## Batch Compatibility, Retry & Authorization (#365)
+
+- **Idempotent retries:** `transformForRead()` and `transformForWrite()` are pure, non-mutating transforms. Re-running them after a transient read or migration failure produces the identical `VersionedRecord` without double-upgrading fields.
+- **Write authorization:** `isWriteAllowed(version)` returns `true` only for `DEPRECATION_POLICY.supported.versions`. Deprecated (`"0"`) and unsupported versions are rejected for writes.
+- **Batch verification & rollback:** `validateSchemaCompatibilityBatch(records, options)` validates mixed legacy/current batches without aborting on individual bad rows, isolating per-record errors (`UNSUPPORTED_SCHEMA_VERSION`, `INVALID_SCHEMA_RECORD`). When `requireAuthorization: true` is passed, only `admin`, `maintainer`, or `ops` actors are permitted (`UNAUTHORIZED_SCHEMA_OPERATION` otherwise). Because read upgrades are computed in memory without mutating persisted rows, rolling back a schema reader change requires no destructive data rewrite.
+
 ## Tests
 
 ```bash
 cd backend
-node --import tsx --test tests/schema-versioning.test.ts
+node --import tsx --test tests/schema-versioning.test.ts tests/schema-compatibility.test.ts
 ```

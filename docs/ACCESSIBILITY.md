@@ -17,6 +17,7 @@ node --test tests/invoice-form-validation.test.js   # inline form error rules
 node --test tests/pay-status-a11y.test.js           # pay-page announcements, keyboard and focus
 node --test tests/a11y-core-pages.test.js           # axe over every core page and component
 node --test tests/a11y-regression-flows.test.js     # dense form, retry, proof table, reduced motion
+node --test tests/a11y-async-error-recovery.test.js # async error recovery, live regions, wallet auth (#371)
 ```
 
 The last two load `.ts` modules through Node's type stripping: use Node 24 (as

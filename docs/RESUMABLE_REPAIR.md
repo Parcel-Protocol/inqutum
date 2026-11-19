@@ -224,3 +224,14 @@ CREATE INDEX IF NOT EXISTS idx_repair_checkpoints_status
 
 - **Backward Compatibility:** Completely non-breaking; all existing tables, foreign keys, and indexes remain unchanged.
 - **Rollback:** `DROP TABLE IF EXISTS record_repair_checkpoints;`.
+
+---
+
+## Dry-Run Repair Tooling & File Checkpoints (#366)
+
+Module: [`backend/src/ops/dry-run-repair-tool.ts`](../backend/src/ops/dry-run-repair-tool.ts).
+
+- **Safe-by-default:** `runDryRunRepairTool()` defaults to `dryRun: true` (`apply: false`), scanning all configured phases and logging planned actions with zero `UPDATE` or `DELETE` queries.
+- **File-backed atomic checkpoints:** `FileRepairCheckpointStore` persists checkpoints atomically (`<jobId>.json.tmp` -> `<jobId>.json`), allowing paused (`maxBatches`) or `failed` dry-run jobs to be inspected and resumed via `resumeJobId` without duplicating previously scanned batches.
+- **Apply authorization guard:** Passing `apply: true` without an authorized `admin`, `maintainer`, or `ops` actor throws `UnauthorizedRepairApplyError` (`UNAUTHORIZED_REPAIR_APPLY`) before any database mutation runs.
+- **Tests:** `node --import tsx --test tests/dry-run-repair-tool.test.ts` (in `backend/`).
