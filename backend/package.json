@@ -31,6 +31,9 @@
     "evidence:check": "tsx ../scripts/generate-evidence-pack.ts --check",
     "release:gate": "tsx ../scripts/release-readiness-gate.ts",
     "release:check": "tsx ../scripts/release-readiness-gate.ts --check",
+    "release:artifact": "tsx ../scripts/release-artifact.ts build",
+    "release:artifact:verify": "tsx ../scripts/release-artifact.ts verify",
+    "release:artifact:check": "tsx ../scripts/release-artifact.ts check",
     "test:load:cardinality": "tsx ../scripts/load-cardinality-burst.ts",
     "typecheck": "tsc --noEmit",
     "verify:security": "tsx -e \"import { assertSafeEnvironment } from './src/config/runtime.ts'; import assert from 'node:assert'; assert.throws(() => assertSafeEnvironment({ NODE_ENV: 'production', ALLOW_SIMULATE: 'true' })); assert.throws(() => assertSafeEnvironment({ DEMO_MODE: 'true', ALLOW_SIMULATE: 'true' })); console.log('✓ Security simulation lockout verified');\""

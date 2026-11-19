@@ -51,6 +51,9 @@ jobs:
       - name: Release readiness gate
         run: npm run release:check
 
+      - name: Release artifact reproducibility
+        run: npm run release:artifact:check
+
   frontend:
     name: Frontend — lint, typecheck and tests
     runs-on: ubuntu-latest
