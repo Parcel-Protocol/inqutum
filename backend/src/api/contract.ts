@@ -471,9 +471,9 @@ export const API_CONTRACT: ContractEndpoint[] = [
     path: '/api/exports',
     group: 'public',
     surfaces: BOTH,
-    auth: 'none',
-    summary: 'Generate an export artifact. Returns an expiring download handle.',
-    responses: [201, 400, 403, 500, 503],
+    auth: 'public',
+    summary: 'Generate an export artifact. Returns an expiring download handle. Field visibility follows the caller.',
+    responses: [201, 400, 401, 403, 500, 503],
   },
   {
     method: 'GET',
@@ -483,7 +483,7 @@ export const API_CONTRACT: ContractEndpoint[] = [
     auth: 'none',
     summary: 'Download an export artifact. 410 once it has expired.',
     responseKind: 'raw',
-    responses: [200, 400, 404, 410],
+    responses: [200, 400, 401, 404, 410],
   },
 
   // ── Bulk import ─────────────────────────────────────────────────────────
@@ -492,7 +492,7 @@ export const API_CONTRACT: ContractEndpoint[] = [
     path: '/api/imports/invoices/template',
     group: 'public',
     surfaces: BOTH,
-    auth: 'none',
+    auth: 'public',
     summary: 'Download the canonical invoice import CSV template.',
     responseKind: 'raw',
     responses: [200],

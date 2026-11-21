@@ -165,8 +165,8 @@ cursor. These semantics are pinned by
 | `GET` | `/api/notifications/preferences` | none | 200, 400 | Retrieve durable notification routing preferences for a recipient, plus the `mandatoryCategories` routing always delivers. |
 | `PUT` | `/api/notifications/preferences` | public | 200, 400, 401, 403 | Update notification preferences. The recipient's own wallet session or a maintainer bearer; another wallet or a service token is 403. Strict body, see [NOTIFICATION_PREFERENCES_ROUTING.md](NOTIFICATION_PREFERENCES_ROUTING.md). |
 | `GET` | `/api/notifications/routing-audit` | none | 200, 400 | Retrieve routing and override audit trail for a recipient. |
-| `POST` | `/api/exports` | none | 201, 400, 403, 500, 503 | Generate an export artifact. Returns an expiring download handle. |
-| `GET` | `/api/exports/:id` | none | 200, 400, 404, 410 | Download an export artifact. 410 once it has expired. |
+| `POST` | `/api/exports` | public | 201, 400, 401, 403, 500, 503 | Generate an export artifact. Returns an expiring download handle. Field visibility follows the caller. |
+| `GET` | `/api/exports/:id` | public | 200, 400, 401, 404, 410 | Download an export artifact. 410 once it has expired. |
 | `GET` | `/api/imports/invoices/template` | none | 200 | Download the canonical invoice import CSV template. |
 | `POST` | `/api/imports/invoices` | none | 200, 400, 429, 500 | Bulk-import invoices from JSON or CSV. Dry run by default; `dryRun: false` writes. |
 | `GET` | `/api/stellar/account` | none | 200 | Account balances from Horizon. |

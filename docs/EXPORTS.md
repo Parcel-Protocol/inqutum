@@ -31,19 +31,60 @@ CSV contains the header row plus records only (metadata is returned by
 `POST /exports`). Cells starting with `= + - @` (or tab/CR) are prefixed with
 `'` to prevent spreadsheet formula injection.
 
-## Authorization
+## Authorization and redaction
 
-An export is generated for the requesting wallet only.
-`sellerPublicKey` may be sent as an explicit scope, but must equal `requester`;
-anything else is `403 EXPORT_FORBIDDEN`. A generated artifact can only be
-downloaded by its owner; other wallets get `404`, indistinguishable from an
-unknown id. Rows that are not the requester's are dropped even if storage
-returns them.
+Who is asking decides which wallet they may export and how much of each column
+they see. The decision lives in one pure function,
+`resolveExportAccess` (`backend/src/exports/export-field-policy.ts`).
 
-> As with `GET /invoices`, wallet identity is asserted by the caller (the API
-> has no signed authentication yet). Exports contain no personal data beyond
-> what an invoice link already shows; bind `requester` to an authenticated
-> wallet session when one exists.
+| Caller | May export | Viewer | Owns the artifact |
+| --- | --- | --- | --- |
+| Wallet session (`end_user`) | Only their own wallet (`requester` must equal the session wallet) | `owner` — every column | the wallet |
+| `maintainer` / `service` token | Any seller (`sellerPublicKey`, else `requester`) | `operator` — redacted | the token (so the seller cannot download it) |
+| No credentials (legacy) | Only the wallet they name | `owner` | the wallet |
+| Invalid / expired credentials | Nothing: `401 EXPORT_UNAUTHENTICATED` | — | — |
+
+Asking for another wallet's scope as an `end_user` or unauthenticated caller is
+`403 EXPORT_FORBIDDEN`. The viewer is derived from the credential, never from the
+request body, so a caller cannot ask to be treated as `owner`.
+
+### Field policy
+
+| Field | `owner` | `operator` |
+| --- | --- | --- |
+| `memo` | full | masked (first 4 characters + `[REDACTED]`; shorter values fully redacted) |
+| `description` | full | `[REDACTED]` |
+| all other columns | full | full |
+
+Redaction replaces the value and keeps the column, so the schema (and
+`schemaVersion`, still **1**) is unchanged and consumers need no branching.
+`null` stays `null`. `memo` and `description` always pass through secret
+scrubbing first, whoever asks.
+
+Any caller may also send `redactFields: ["amount", ...]` (a subset of the
+columns) to blank more columns, for example before sharing a file. A request can
+only narrow what the viewer sees, never widen it; unknown column names are a
+`400`. An unknown viewer fails closed to everything redacted.
+
+The metadata and JSON file carry `viewer` and `redactedFields` (the columns
+subject to redaction for this file). Every export writes a `PROOF_EXPORTED`
+audit event with the viewer, the exported wallet and the redacted fields; an
+operator export is recorded with actor type `maintainer`.
+
+Artifacts are downloaded by their owner only. Another wallet, another operator,
+and the seller of an operator-generated file all get `404`, indistinguishable
+from an unknown id. A wallet session must still name its own wallet in
+`requester`; naming another wallet's is a `404`.
+
+> Without a credential, wallet identity is asserted by the caller, as with
+> `GET /invoices`. Send a wallet session to have it enforced.
+
+### Rollback and migration
+
+Additive: existing callers keep working. `viewer` / `redactedFields` are new
+metadata members; record columns and `schemaVersion` are unchanged. Artifacts
+are in memory, so there is nothing to migrate. To roll back, revert the change;
+no stored data depends on it.
 
 ## Retention and limits
 
@@ -61,7 +102,7 @@ survive a restart; no migration or configuration is needed.
 ## API
 
 ```
-POST /api/exports   { "requester": "G…", "format": "json|csv", "status": "PAID", "from": ISO, "to": ISO }
+POST /api/exports   { "requester": "G…", "format": "json|csv", "status": "PAID", "from": ISO, "to": ISO, "redactFields": ["description"] }
   -> 201 { …metadata, downloadPath }
 GET  /api/exports/:id?requester=G…   -> file (Cache-Control: private, no-store)
 ```

@@ -21,25 +21,14 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { InvoiceStorage, StoredInvoice } from '../storage/invoice-storage';
 import { redactSensitiveText } from '../security/redaction';
+import { EXPORT_FIELDS, type ExportField, type ExportRecord } from './export-fields';
+import { redactRecord, restrictedFields, type ExportViewer } from './export-field-policy';
 
 export const EXPORT_SCHEMA_ID = 'quittance.invoice-export';
 export const EXPORT_SCHEMA_VERSION = 1;
 
-export const EXPORT_FIELDS = [
-  'id',
-  'memo',
-  'status',
-  'amount',
-  'assetCode',
-  'assetIssuer',
-  'description',
-  'createdAt',
-  'expiresAt',
-  'paidAt',
-  'paymentTxHash',
-] as const;
-export type ExportField = (typeof EXPORT_FIELDS)[number];
-export type ExportRecord = Record<ExportField, string | number | null>;
+export { EXPORT_FIELDS };
+export type { ExportField, ExportRecord };
 
 export type ExportFormat = 'json' | 'csv';
 
@@ -48,6 +37,17 @@ export interface ExportRequest {
   status?: string;
   from?: Date;
   to?: Date;
+  /**
+   * Extra columns to redact (#354). Can only narrow what the viewer sees,
+   * never widen it.
+   */
+  redactFields?: readonly ExportField[];
+}
+
+/** Who the export is for. Decided by the caller's authorization, never by the request body. */
+export interface ExportAccessOptions {
+  /** Defaults to `owner`. `operator` may export a scope other than the requester's, redacted. */
+  viewer?: ExportViewer;
 }
 
 export interface ExportMetadata {
@@ -59,6 +59,10 @@ export interface ExportMetadata {
   expiresAt: string;
   scope: { sellerPublicKey: string };
   filters: { status: string | null; from: string | null; to: string | null };
+  /** Which field policy produced this file (#354). */
+  viewer: ExportViewer;
+  /** Columns subject to redaction for this file (values may still be null). Empty when nothing is redacted. */
+  redactedFields: ExportField[];
   recordCount: number;
   /** True when the record cap was hit; narrow the filters to get the rest. */
   truncated: boolean;
@@ -177,14 +181,20 @@ export class ExportService {
    * @param signal optional AbortSignal; checked between storage pages so a
    *               caller that disconnects or times out can cancel a large
    *               export in flight. Throws ExportCancelledError on abort.
+   * @param access which field policy applies (#354). An `operator` export may
+   *               target any scope; the artifact is then owned by `requester`
+   *               (the operator), not by the seller whose data it holds.
    */
   async create(
     requester: string,
     request: ExportRequest,
     scope: string = requester,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    access: ExportAccessOptions = {}
   ): Promise<ExportArtifact> {
-    if (scope !== requester) throw new ExportForbiddenError();
+    const viewer: ExportViewer = access.viewer ?? 'owner';
+    if (viewer === 'owner' && scope !== requester) throw new ExportForbiddenError();
+    const extraRedactions = (request.redactFields ?? []).filter((f): f is ExportField => (EXPORT_FIELDS as readonly string[]).includes(f));
     this.purgeExpired();
 
     const records: ExportRecord[] = [];
@@ -195,7 +205,7 @@ export class ExportService {
     const seenIds = new Set<string>();
     while (!truncated) {
       if (signal?.aborted) throw new ExportCancelledError();
-      const page = await this.storage.getInvoicesBySeller(requester, request.status, this.pageSize, 0, after);
+      const page = await this.storage.getInvoicesBySeller(scope, request.status, this.pageSize, 0, after);
       if (signal?.aborted) throw new ExportCancelledError();
       const tail = page[page.length - 1];
       if (tail) after = { createdAt: new Date(new Date(tail.createdAt).getTime()), id: tail.id };
@@ -203,8 +213,8 @@ export class ExportService {
       for (const invoice of page) {
         if (seenIds.has(invoice.id)) continue;
         seenIds.add(invoice.id);
-        // Defence in depth: never emit a row that is not the requester's.
-        if (invoice.sellerPublicKey !== requester) continue;
+        // Defence in depth: never emit a row that is not in scope.
+        if (invoice.sellerPublicKey !== scope) continue;
         const created = new Date(invoice.createdAt).getTime();
         if (request.from && created < request.from.getTime()) continue;
         if (request.to && created > request.to.getTime()) continue;
@@ -212,7 +222,7 @@ export class ExportService {
           truncated = true;
           break;
         }
-        records.push(toExportRecord(invoice));
+        records.push(redactRecord(toExportRecord(invoice), viewer, extraRedactions).record);
       }
       if (page.length < this.pageSize || seenIds.size === before) break;
     }
@@ -224,8 +234,10 @@ export class ExportService {
       exportId: uuidv4(),
       generatedAt: generatedAt.toISOString(),
       expiresAt: new Date(generatedAt.getTime() + this.retentionMs).toISOString(),
-      scope: { sellerPublicKey: requester },
+      scope: { sellerPublicKey: scope },
       filters: { status: request.status ?? null, from: iso(request.from), to: iso(request.to) },
+      viewer,
+      redactedFields: restrictedFields(viewer, extraRedactions),
       recordCount: records.length,
       truncated,
       fields: EXPORT_FIELDS,

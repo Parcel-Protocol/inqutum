@@ -169,7 +169,7 @@ Audit retention is bounded and in-memory; see
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/exports` | Create an export job. |
+| POST | `/exports` | Create an export job. Field visibility depends on who is asking (`viewer`, `redactedFields`); optional `redactFields`. `401 EXPORT_UNAUTHENTICATED` for a bad credential, `403 EXPORT_FORBIDDEN` for another wallet. See [`EXPORTS.md`](./EXPORTS.md). |
 | GET | `/exports/:id` | Fetch status and download URL. `410 EXPORT_EXPIRED` once past the retention window. |
 
 ### Notifications
