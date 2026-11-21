@@ -169,3 +169,39 @@ test('executeProofEmail retry path: second call succeeds after transient failure
   assert.equal(second.success, true);
   assert.equal(attempts, 2);
 });
+
+// ---------------------------------------------------------------- Additional edge cases (issue #164)
+
+test('validateProofDownload rejects undefined invoice', () => {
+  const r = validateProofDownload(undefined);
+  assert.equal(r.ok, false);
+});
+
+test('validateProofEmail rejects empty string customerEmail', () => {
+  const r = validateProofEmail({ status: 'PAID', customerEmail: '' });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 'NO_EMAIL');
+});
+
+test('PROOF_ERRORS is frozen', () => {
+  assert.throws(() => {
+    'use strict';
+    PROOF_ERRORS.NO_EMAIL = 'mutated';
+  });
+});
+
+test('classifyProofError handles non-Error objects with a message property', () => {
+  const result = classifyProofError({ message: 'rate limited' }, 'email');
+  assert.equal(typeof result, 'string');
+  assert.ok(result.length > 0);
+});
+
+test('executeProofDownload does not call onDownload for cancelled invoice', async () => {
+  let downloadCalled = false;
+  const r = await executeProofDownload(
+    { onDownload: () => { downloadCalled = true; } },
+    { status: 'CANCELLED', customerEmail: 'buyer@example.com' }
+  );
+  assert.equal(r.success, false);
+  assert.equal(downloadCalled, false);
+});

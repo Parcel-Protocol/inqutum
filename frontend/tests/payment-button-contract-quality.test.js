@@ -166,3 +166,50 @@ test('no onStart when wallet is not installed', async () => {
   // This test documents that onStart IS called even when wallet is unavailable.
   assert.equal(startCalled, true);
 });
+
+// ---------------------------------------------------------------- Additional edge cases (issue #166)
+
+test('WALLET_ERRORS is frozen', () => {
+  assert.throws(() => {
+    'use strict';
+    WALLET_ERRORS.NOT_INSTALLED = 'mutated';
+  });
+});
+
+test('validatePaymentRequest rejects undefined params', () => {
+  const r = validatePaymentRequest(undefined);
+  assert.equal(r.ok, false);
+});
+
+test('validatePaymentRequest rejects Infinity amount', () => {
+  const r = validatePaymentRequest({ ...validParams, amount: Infinity });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 'INVALID_AMOUNT');
+});
+
+test('validatePaymentRequest rejects empty string amount', () => {
+  const r = validatePaymentRequest({ ...validParams, amount: '' });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 'INVALID_AMOUNT');
+});
+
+test('classifyPaymentError with no error object falls back gracefully', () => {
+  const c = classifyPaymentError(null, 'XLM');
+  assert.equal(c.title, 'Payment failed');
+  assert.equal(typeof c.description, 'string');
+});
+
+test('executePaymentContract: onError is called with the wallet error message', async () => {
+  let errMsg = null;
+  await executePaymentContract(
+    {
+      checkWalletConnection: async () => false,
+      requestWalletAccess: async () => true,
+      sendPayment: async () => 'hash',
+      showFreighterInstallPrompt: () => {},
+      onError: (m) => { errMsg = m; },
+    },
+    validParams
+  );
+  assert.equal(errMsg, WALLET_ERRORS.NOT_INSTALLED);
+});
