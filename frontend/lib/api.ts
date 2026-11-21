@@ -12,6 +12,7 @@ import { Networks } from '@stellar/stellar-sdk';
 import { createSessionManager, installWalletAuth } from './auth-session.ts';
 import { useWalletStore } from './store';
 import { newIdempotencyKey } from './idempotency-key.ts';
+import { parseServiceStatus, type ServiceStatus } from './service-status';
 
 const USE_MOCK_API = process.env.NEXT_PUBLIC_USE_MOCK === 'true';
 export const API_CONFIG = resolveApiConfig(
@@ -233,6 +234,22 @@ export const healthCheck = USE_MOCK_API ? mockHealthCheck : async () => {
   const response = await api.get('/health');
   return response.data;
 };
+
+/**
+ * Which features are degraded right now (#381). Never throws: a status check
+ * that fails must not itself become an error the user sees, so any failure or
+ * malformed answer is `null` ("nothing to report"). Connectivity problems are
+ * ApiStatusBanner's job.
+ */
+export async function fetchServiceStatus(): Promise<ServiceStatus | null> {
+  if (USE_MOCK_API || !API_CONFIG.configured) return null;
+  try {
+    const response = await api.get('/status');
+    return parseServiceStatus(response.data?.data);
+  } catch {
+    return null;
+  }
+}
 
 export { apiErrorMessage, isApiUnavailableError, resolveVerificationError };
 

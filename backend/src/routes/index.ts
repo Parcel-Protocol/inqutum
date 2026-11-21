@@ -28,12 +28,18 @@ import { createFeeRouter } from './fee.routes';
 import { createImportRouter } from './import.routes';
 import { createMergeReviewRouter } from './merge-review.routes';
 import { createPaymentMonitorRouter } from './payment-monitor.routes';
+import { createStatusRouter } from './status.routes';
+import { horizonProbe, postgresProbe } from '../ops/dependency-probes';
+import { STELLAR_HORIZON_URL } from '../config/stellar';
 
 const router: Router = Router();
 
 // Health check
 router.get('/health', healthHandler(postgresInvoiceStorage.mode));
 router.get('/ready', readinessHandler(postgresInvoiceStorage.mode));
+
+// Public, sanitized status of degraded dependencies for end users (#381)
+router.use(createStatusRouter({ probes: { postgres: postgresProbe(pool), stellar_horizon: horizonProbe(STELLAR_HORIZON_URL) } }));
 
 // Invoice routes — same handlers the MVP server uses, backed by PostgreSQL
 router.use(createInvoiceRouter({ storage: postgresInvoiceStorage }));

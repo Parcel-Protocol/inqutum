@@ -220,6 +220,15 @@ export const API_CONTRACT: ContractEndpoint[] = [
     responseKind: 'raw',
     responses: [200, 503],
   },
+  {
+    method: 'GET',
+    path: '/api/status',
+    group: 'public',
+    surfaces: BOTH,
+    auth: 'none',
+    summary: 'Sanitized per-feature status for end users. Always 200; the state is in the body.',
+    responses: [200],
+  },
 
   // ── Invoices ────────────────────────────────────────────────────────────
   {
@@ -471,19 +480,19 @@ export const API_CONTRACT: ContractEndpoint[] = [
     path: '/api/exports',
     group: 'public',
     surfaces: BOTH,
-    auth: 'none',
-    summary: 'Generate an export artifact. Returns an expiring download handle.',
-    responses: [201, 400, 403, 500, 503],
+    auth: 'public',
+    summary: 'Generate an export artifact. Returns an expiring download handle. Field visibility follows the caller.',
+    responses: [201, 400, 401, 403, 500, 503],
   },
   {
     method: 'GET',
     path: '/api/exports/:id',
     group: 'public',
     surfaces: BOTH,
-    auth: 'none',
+    auth: 'public',
     summary: 'Download an export artifact. 410 once it has expired.',
     responseKind: 'raw',
-    responses: [200, 400, 404, 410],
+    responses: [200, 400, 401, 404, 410],
   },
 
   // ── Bulk import ─────────────────────────────────────────────────────────
