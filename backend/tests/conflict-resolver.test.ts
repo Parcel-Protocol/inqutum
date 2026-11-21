@@ -136,6 +136,7 @@ describe('Deterministic Conflict Resolver (#284)', () => {
 
     const result = resolveMultiClientConflict(base, server, clientUpdate, {
       strategy: 'CLIENT_WINS',
+      actorRole: 'ADMIN',
     });
 
     assert.strictEqual(result.resolved, true);
@@ -243,5 +244,82 @@ describe('Deterministic Conflict Resolver (#284)', () => {
         return true;
       }
     );
+  });
+
+  it('CLIENT_WINS authorization: rejects overwrite by COLLABORATOR', () => {
+    const base = createMockInvoice({ version: 1, sellerName: 'Acme Old' });
+    const server = createMockInvoice({ version: 2, sellerName: 'Acme Official' });
+
+    assert.throws(
+      () =>
+        resolveMultiClientConflict(base, server, { sellerName: 'Acme Alternate' }, {
+          strategy: 'CLIENT_WINS',
+          actorRole: 'COLLABORATOR',
+          actorId: 'collab-bob',
+        }),
+      (err: any) => {
+        assert.ok(err instanceof UnauthorizedEditError);
+        assert.strictEqual(err.code, 'UNAUTHORIZED_EDIT');
+        assert.strictEqual(err.httpStatus, 403);
+        return true;
+      }
+    );
+  });
+
+  it('CLIENT_WINS authorization: fails closed when actorRole is missing', () => {
+    const base = createMockInvoice({ version: 1, sellerName: 'Acme Old' });
+    const server = createMockInvoice({ version: 2, sellerName: 'Acme Official' });
+
+    assert.throws(
+      () =>
+        resolveMultiClientConflict(base, server, { sellerName: 'Acme Alternate' }, {
+          strategy: 'CLIENT_WINS',
+        }),
+      UnauthorizedEditError
+    );
+  });
+
+  it('CLIENT_WINS failure: a rejected overwrite leaves the server snapshot unchanged', () => {
+    const base = createMockInvoice({ version: 1, sellerName: 'Acme Old' });
+    const server = createMockInvoice({ version: 2, sellerName: 'Acme Official' });
+
+    assert.throws(() =>
+      resolveMultiClientConflict(base, server, { sellerName: 'Acme Alternate' }, {
+        strategy: 'CLIENT_WINS',
+        actorRole: 'VIEWER',
+      })
+    );
+    assert.strictEqual(server.sellerName, 'Acme Official');
+    assert.strictEqual(server.version, 2);
+  });
+
+  it('retry: re-resolving against a refreshed server snapshot succeeds after a version bump', () => {
+    const base = createMockInvoice({ version: 1, description: 'Initial design work' });
+    const staleServer = createMockInvoice({ version: 2, description: 'Design work with revisions' });
+    const clientUpdate = { customerEmail: 'alice.new@example.com' };
+
+    const first = resolveMultiClientConflict(base, staleServer, clientUpdate, {
+      actorRole: 'SELLER',
+      actorId: 'seller-1',
+    });
+    assert.strictEqual(first.resolved, true);
+    assert.strictEqual(first.newVersion, 3);
+
+    // Another writer bumps the server again between merge and persistence.
+    const refreshedServer = createMockInvoice({
+      version: 3,
+      description: 'Design work with revisions',
+      sellerName: 'Acme Renamed',
+    });
+    const retry = resolveMultiClientConflict(base, refreshedServer, clientUpdate, {
+      actorRole: 'SELLER',
+      actorId: 'seller-1',
+    });
+    assert.strictEqual(retry.resolved, true);
+    assert.strictEqual(retry.baseVersion, 1);
+    assert.strictEqual(retry.serverVersion, 3);
+    assert.strictEqual(retry.newVersion, 4);
+    assert.strictEqual(retry.mergedInvoice?.sellerName, 'Acme Renamed');
+    assert.strictEqual(retry.mergedInvoice?.customerEmail, 'alice.new@example.com');
   });
 });

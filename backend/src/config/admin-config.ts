@@ -25,6 +25,12 @@
  */
 import { auditStore, type AuditEvent } from '../audit/audit-service';
 import {
+  RECEIPT_KEY_ENV,
+  disclosedReceiptFor,
+  receiptKeyFromEnv,
+  signAuditReceipt,
+} from '../audit/audit-receipt';
+import {
   FEATURE_FLAGS,
   environmentFeatureValue,
   featureFlagOverrides,
@@ -68,6 +74,8 @@ export interface ConfigChangeResult {
   /** Evidence written for this change; null for a no-op. */
   auditEventId: string | null;
   auditEventHash: string | null;
+  /** Signed receipt for the change, disclosed to the actor only; null when no key is configured (non-production) or for a no-op. */
+  receipt: string | null;
 }
 
 export type AdminConfigErrorCode =
@@ -159,7 +167,20 @@ export class AdminConfigService {
     const before = this.state(flag);
     const enabled = request.enabled as boolean | null;
     if (before.override === enabled) {
-      return { changed: false, version: this.version, flag: before, auditEventId: null, auditEventHash: null };
+      return { changed: false, version: this.version, flag: before, auditEventId: null, auditEventHash: null, receipt: null };
+    }
+
+    // Receipt key is resolved before any evidence is written. Production refuses
+    // the change outright when the key is missing or invalid (fail closed).
+    const env = this.options.env ?? process.env;
+    let receiptKey: string | null;
+    try {
+      receiptKey = receiptKeyFromEnv(env);
+    } catch {
+      throw new AdminConfigError('CONFIG_AUDIT_UNAVAILABLE', 'Audit receipt signing key is invalid, so the change was not applied; fix configuration and retry');
+    }
+    if (receiptKey === null && env.NODE_ENV === 'production') {
+      throw new AdminConfigError('CONFIG_AUDIT_UNAVAILABLE', `${RECEIPT_KEY_ENV} is not set, so the change was not applied`);
     }
 
     const nextVersion = this.version + 1;
@@ -171,6 +192,7 @@ export class AdminConfigService {
     };
 
     let evidence: AuditEvent;
+    let receipt: string | null = null;
     try {
       evidence = this.recordAudit({
         action: 'CONFIG_CHANGED',
@@ -187,13 +209,23 @@ export class AdminConfigService {
         },
         correlationId: request.correlationId,
       });
+      receipt = receiptKey === null ? null : signAuditReceipt(evidence, receiptKey);
     } catch {
-      throw new AdminConfigError('CONFIG_AUDIT_UNAVAILABLE', 'Audit evidence could not be recorded, so the change was not applied; retry');
+      // Evidence or its receipt failed: nothing is applied. The appended event
+      // stays in the chain as a record of the refused attempt (the chain is append-only).
+      throw new AdminConfigError('CONFIG_AUDIT_UNAVAILABLE', 'Audit evidence or receipt could not be recorded, so the change was not applied; retry');
     }
 
     this.overrides.set(flag, enabled);
     this.version = nextVersion;
-    return { changed: true, version: nextVersion, flag: this.state(flag), auditEventId: evidence.id, auditEventHash: evidence.hash ?? null };
+    return {
+      changed: true,
+      version: nextVersion,
+      flag: this.state(flag),
+      auditEventId: evidence.id,
+      auditEventHash: evidence.hash ?? null,
+      receipt: disclosedReceiptFor(receipt, evidence, request.actorId),
+    };
   }
 }
 

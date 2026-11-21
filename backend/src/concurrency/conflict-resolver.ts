@@ -109,6 +109,12 @@ export class UnauthorizedEditError extends ConflictResolverError {
   }
 }
 
+/**
+ * Roles allowed to apply CLIENT_WINS (overwrite server truth on collision).
+ * Any other role, or a missing actorRole, is rejected before merging (fail closed).
+ */
+export const CLIENT_WINS_ROLES: ReadonlySet<string> = new Set(['OWNER', 'ADMIN', 'SELLER']);
+
 /** Fields that can never be modified post-creation under any circumstances */
 export const IMMUTABLE_FIELDS = new Set<string>([
   'id',
@@ -281,6 +287,11 @@ export function resolveMultiClientConflict(
 
   // 2. Authorization check
   if (options.actorRole === 'VIEWER') {
+    throw new UnauthorizedEditError(actorId);
+  }
+
+  // 2b. CLIENT_WINS overrides server truth, so it is restricted to privileged roles.
+  if (strategy === 'CLIENT_WINS' && !CLIENT_WINS_ROLES.has(options.actorRole ?? '')) {
     throw new UnauthorizedEditError(actorId);
   }
 
