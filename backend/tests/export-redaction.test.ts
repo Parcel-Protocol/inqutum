@@ -107,12 +107,23 @@ describe('field policy', () => {
   });
 
   it('every allow-listed field has a policy for every viewer', () => {
-    for (const viewer of ['owner', 'operator'] as const) {
+    for (const viewer of ['owner', 'operator', 'public'] as const) {
       assert.deepEqual(Object.keys(FIELD_POLICY[viewer]).sort(), [...EXPORT_FIELDS].sort());
     }
     assert.equal(isExportField('memo'), true);
     assert.equal(isExportField('sellerEmail'), false);
     assert.equal(isExportField(5), false);
+  });
+
+  it('regression: no-credentials caller is never more privileged than an operator', () => {
+    const anon = resolveExportAccess({ actor: undefined, requester: SELLER });
+    assert.ok(anon.ok && anon.viewer === 'public');
+    const anonView = redactRecord(full(), 'public').record;
+    const operatorView = redactRecord(full(), 'operator').record;
+    assert.equal(anonView.description, REDACTED_MARKER);
+    for (const f of EXPORT_FIELDS) {
+      if (operatorView[f] === REDACTED_MARKER) assert.equal(anonView[f], REDACTED_MARKER);
+    }
   });
 });
 
@@ -120,8 +131,9 @@ describe('resolveExportAccess', () => {
   const wallet = Keypair.random().publicKey();
   const endUser = { role: 'end_user' as const, subject: wallet, wallet };
 
-  it('anonymous (legacy): own wallet as owner, another wallet forbidden', () => {
-    assert.deepEqual(resolveExportAccess({ actor: undefined, requester: SELLER }), { ok: true, viewer: 'owner', scope: SELLER, owner: SELLER });
+  it('anonymous (legacy): asserting a wallet yields only the public view, another wallet forbidden', () => {
+    assert.deepEqual(resolveExportAccess({ actor: undefined, requester: SELLER }), { ok: true, viewer: 'public', scope: SELLER, owner: SELLER });
+    assert.deepEqual(resolveExportAccess({ actor: { role: 'anonymous', subject: 'anonymous' } as never, requester: SELLER }), { ok: true, viewer: 'public', scope: SELLER, owner: SELLER });
     const denied = resolveExportAccess({ actor: undefined, requester: SELLER, scope: OTHER });
     assert.equal(denied.ok, false);
     assert.equal(!denied.ok && denied.code, 'EXPORT_FORBIDDEN');
@@ -249,18 +261,20 @@ describe('export routes: permission-aware access', () => {
     });
   const sessionFor = (wallet: string) => issueSessionToken(loadAuthConfig().sessionSecret!, wallet, { ttlSeconds: 600 }).token;
 
-  it('legacy unauthenticated owner export still works and is unredacted', async () => {
+  it('legacy unauthenticated export still works but is redacted: a wallet string is not ownership', async () => {
     const res = await post({ requester: SELLER });
     assert.equal(res.status, 201);
     const meta = (await res.json()).data;
-    assert.equal(meta.viewer, 'owner');
-    assert.deepEqual(meta.redactedFields, []);
+    assert.equal(meta.viewer, 'public');
+    assert.ok(meta.redactedFields.includes('description'));
     const file = await fetch(`${base}${meta.downloadPath.replace('/api', '')}`);
-    assert.ok((await file.text()).includes('Dana'));
+    const text = await file.text();
+    assert.ok(!text.includes('Dana'));
+    assert.ok(text.includes(REDACTED_MARKER));
   });
 
   it('owner redactFields are applied to the downloaded file and audited', async () => {
-    const res = await post({ requester: SELLER, redactFields: ['description'] });
+    const res = await post({ requester: SELLER, redactFields: ['description'] }, sessionFor(SELLER));
     const meta = (await res.json()).data;
     assert.deepEqual(meta.redactedFields, ['description']);
     const body = await (await fetch(`${base}${meta.downloadPath.replace('/api', '')}`)).text();

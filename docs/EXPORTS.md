@@ -41,7 +41,7 @@ they see. The decision lives in one pure function,
 | --- | --- | --- | --- |
 | Wallet session (`end_user`) | Only their own wallet (`requester` must equal the session wallet) | `owner` — every column | the wallet |
 | `maintainer` / `service` token | Any seller (`sellerPublicKey`, else `requester`) | `operator` — redacted | the token (so the seller cannot download it) |
-| No credentials (legacy) | Only the wallet they name | `owner` | the wallet |
+| No credentials (legacy) | Only the wallet they name | `public` — redacted (a wallet string is not proof of ownership) | the wallet |
 | Invalid / expired credentials | Nothing: `401 EXPORT_UNAUTHENTICATED` | — | — |
 
 Asking for another wallet's scope as an `end_user` or unauthenticated caller is
@@ -50,11 +50,12 @@ request body, so a caller cannot ask to be treated as `owner`.
 
 ### Field policy
 
-| Field | `owner` | `operator` |
-| --- | --- | --- |
-| `memo` | full | masked (first 4 characters + `[REDACTED]`; shorter values fully redacted) |
-| `description` | full | `[REDACTED]` |
-| all other columns | full | full |
+| Field | `owner` | `operator` | `public` |
+| --- | --- | --- | --- |
+| `memo` | full | masked (first 4 characters + `[REDACTED]`; shorter values fully redacted) | `[REDACTED]` |
+| `description` | full | `[REDACTED]` | `[REDACTED]` |
+| `paidAt`, `paymentTxHash` | full | full | `[REDACTED]` |
+| all other columns | full | full | full |
 
 Redaction replaces the value and keeps the column, so the schema (and
 `schemaVersion`, still **1**) is unchanged and consumers need no branching.
@@ -81,7 +82,7 @@ from an unknown id. A wallet session must still name its own wallet in
 
 ### Rollback and migration
 
-Additive: existing callers keep working. `viewer` / `redactedFields` are new
+Existing callers keep working, with one deliberate tightening: unauthenticated callers that name a wallet now receive the redacted `public` view instead of the full `owner` view. Authenticated wallet sessions are unchanged. `viewer` / `redactedFields` are new
 metadata members; record columns and `schemaVersion` are unchanged. Artifacts
 are in memory, so there is nothing to migrate. To roll back, revert the change;
 no stored data depends on it.

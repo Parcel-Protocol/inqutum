@@ -193,7 +193,7 @@ export class ExportService {
     access: ExportAccessOptions = {}
   ): Promise<ExportArtifact> {
     const viewer: ExportViewer = access.viewer ?? 'owner';
-    if (viewer === 'owner' && scope !== requester) throw new ExportForbiddenError();
+    if (viewer !== 'operator' && scope !== requester) throw new ExportForbiddenError();
     const extraRedactions = (request.redactFields ?? []).filter((f): f is ExportField => (EXPORT_FIELDS as readonly string[]).includes(f));
     this.purgeExpired();
 

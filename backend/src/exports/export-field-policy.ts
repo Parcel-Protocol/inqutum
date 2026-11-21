@@ -6,6 +6,8 @@
  * they get to see. Two viewers exist:
  *
  *  - `owner`    the seller exporting their own invoices. Sees every column.
+ *  - `public`   a caller with no verified credentials. A wallet string is not
+ *               proof of ownership, so they get the most restrictive view.
  *  - `operator` a maintainer or service account exporting any seller's data for
  *               support or reconciliation. Sees what is needed to identify and
  *               reconcile an invoice, but not the free-text a seller wrote or
@@ -22,7 +24,7 @@
 import type { Actor } from '../auth/actor';
 import { EXPORT_FIELDS, type ExportField, type ExportRecord } from './export-fields';
 
-export type ExportViewer = 'owner' | 'operator';
+export type ExportViewer = 'owner' | 'operator' | 'public';
 export type FieldVisibility = 'full' | 'masked' | 'redacted';
 
 export const REDACTED_MARKER = '[REDACTED]';
@@ -34,6 +36,20 @@ const MASK_MIN_LENGTH = 8;
 
 export const FIELD_POLICY: Readonly<Record<ExportViewer, Readonly<Record<ExportField, FieldVisibility>>>> = Object.freeze({
   owner: Object.freeze(Object.fromEntries(EXPORT_FIELDS.map((f) => [f, 'full'])) as Record<ExportField, FieldVisibility>),
+  // Unauthenticated: only non-sensitive identifiers; every free-text or payment-linked column is withheld.
+  public: Object.freeze({
+    id: 'full',
+    memo: 'redacted',
+    status: 'full',
+    amount: 'full',
+    assetCode: 'full',
+    assetIssuer: 'full',
+    description: 'redacted',
+    createdAt: 'full',
+    expiresAt: 'full',
+    paidAt: 'redacted',
+    paymentTxHash: 'redacted',
+  }) as Record<ExportField, FieldVisibility>,
   operator: Object.freeze({
     id: 'full',
     memo: 'masked',
@@ -111,8 +127,10 @@ export type ExportAccess =
  *
  *  - Presented-but-invalid credentials are refused, never downgraded to the
  *    legacy "caller asserts a wallet" path.
- *  - No credentials: legacy behaviour, preserved. The caller asserts a wallet,
- *    may only export that wallet, and sees the `owner` view of it.
+ *  - No credentials: the legacy "caller asserts a wallet" path is kept so
+ *    existing clients still work, but asserting a wallet proves nothing, so the
+ *    caller only gets the redacted `public` view. The full `owner` view
+ *    requires an authenticated `end_user` bound to that wallet.
  *  - `end_user`: bound to the wallet they proved control of. They may not
  *    export, or claim to be, another wallet.
  *  - `maintainer` / `service`: may export any seller, but only as `operator`.
@@ -133,7 +151,7 @@ export function resolveExportAccess(input: {
 
   if (!actor || actor.role === 'anonymous') {
     return scope === requester
-      ? { ok: true, viewer: 'owner', scope, owner: requester }
+      ? { ok: true, viewer: 'public', scope, owner: requester }
       : { ok: false, code: 'EXPORT_FORBIDDEN', message: 'You can only export your own invoices' };
   }
 
