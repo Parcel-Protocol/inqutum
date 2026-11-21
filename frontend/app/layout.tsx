@@ -5,6 +5,7 @@ import { Toaster } from 'sonner';
 import { MAIN_CONTENT_ID } from '@/lib/a11y';
 import './globals.css';
 import ApiStatusBanner from '@/components/ApiStatusBanner';
+import ServiceStatusBanner from '@/components/ServiceStatusBanner';
 import FreighterNetworkListener from '@/components/FreighterNetworkListener';
 import WalletSessionSync from '@/components/WalletSessionSync';
 
@@ -46,6 +47,7 @@ export default function RootLayout({
         <Toaster position="top-right" richColors closeButton />
         <WalletSessionSync />
         <ApiStatusBanner />
+        <ServiceStatusBanner />
         <FreighterNetworkListener />
         {children}
       </body>

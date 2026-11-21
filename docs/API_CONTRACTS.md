@@ -139,6 +139,7 @@ cursor. These semantics are pinned by
 | `GET` | `/` | none | 200 | Server banner: name, version and storage mode. |
 | `GET` | `/api/health` | none | 200 | Liveness plus the storage mode the server is running in. |
 | `GET` | `/api/ready` | none | 200, 503 | Readiness probe. 503 when a dependency is unavailable. |
+| `GET` | `/api/status` | none | 200 | Sanitized per-feature status for end users. Always 200; the state is in the body. |
 | `POST` | `/api/invoices` | public | 201, 400, 401, 403 | Create an invoice for the caller's own wallet. 201 returns the stored invoice. |
 | `GET` | `/api/invoices` | public | 200, 400, 401, 403, 500 | List the caller's invoices. Keyset pagination via `cursor`; `limit` clamped to 1-200. |
 | `GET` | `/api/invoices/stats` | public | 200, 400, 401, 403, 500 | Aggregated counts and revenue per asset for the caller's wallet. |

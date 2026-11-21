@@ -10,6 +10,8 @@ import dotenv from 'dotenv';
 import { createInvoiceRouter } from './routes/invoice.routes';
 import { createAuditRouter } from './routes/audit.routes';
 import { createExportRouter } from './routes/export.routes';
+import { createStatusRouter } from './routes/status.routes';
+import { horizonProbe } from './ops/dependency-probes';
 import { createNotificationRouter } from './routes/notification.routes';
 import { createObservabilityRouter } from './routes/observability.routes';
 import memoryInvoiceStorage from './storage/memory-invoice-storage';
@@ -17,7 +19,7 @@ import invoiceMemoryService from './services/invoice-memory.service';
 import paymentMonitorService from './services/payment-monitor.service';
 import { createPaymentMonitorRouter } from './routes/payment-monitor.routes';
 import { FilePaymentMonitorCheckpointStore } from './services/payment-monitor-checkpoint';
-import { SELLER_PUBLIC_KEY } from './config/stellar';
+import { SELLER_PUBLIC_KEY, STELLAR_HORIZON_URL } from './config/stellar';
 import { assertSafeEnvironment, configuredFrontendOrigins, corsOptions } from './config/runtime';
 import { healthHandler, readinessHandler } from './health';
 import { securityHeaders } from './security/content-safety';
@@ -95,6 +97,9 @@ app.get('/', (req: Request, res: Response) => {
 // Health check
 app.get('/api/health', healthHandler(memoryInvoiceStorage.mode));
 app.get('/api/ready', readinessHandler(memoryInvoiceStorage.mode));
+
+// Public, sanitized status of degraded dependencies for end users (#381)
+app.use('/api', createStatusRouter({ probes: { stellar_horizon: horizonProbe(STELLAR_HORIZON_URL) } }));
 
 // Invoice, Audit & Observability routes
 // Restored after #328 dropped them from the MVP server. Wallet sign-in in

@@ -82,6 +82,7 @@ and `offset`. All three return `pagination` in the success envelope.
 |---|---|---|
 | GET | `/health` | Liveness. Reports the storage mode. |
 | GET | `/ready` | Readiness. Checks the database before accepting traffic. |
+| GET | `/status` | Public, sanitized per-feature status for end users (`operational`, `degraded`, `unavailable`, `unknown`). Always `200`; see [`DEPENDENCY-DEGRADATION.md`](./DEPENDENCY-DEGRADATION.md). |
 
 ### Invoices
 

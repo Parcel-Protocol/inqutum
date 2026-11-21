@@ -220,6 +220,15 @@ export const API_CONTRACT: ContractEndpoint[] = [
     responseKind: 'raw',
     responses: [200, 503],
   },
+  {
+    method: 'GET',
+    path: '/api/status',
+    group: 'public',
+    surfaces: BOTH,
+    auth: 'none',
+    summary: 'Sanitized per-feature status for end users. Always 200; the state is in the body.',
+    responses: [200],
+  },
 
   // ── Invoices ────────────────────────────────────────────────────────────
   {
@@ -480,7 +489,7 @@ export const API_CONTRACT: ContractEndpoint[] = [
     path: '/api/exports/:id',
     group: 'public',
     surfaces: BOTH,
-    auth: 'none',
+    auth: 'public',
     summary: 'Download an export artifact. 410 once it has expired.',
     responseKind: 'raw',
     responses: [200, 400, 401, 404, 410],
@@ -492,7 +501,7 @@ export const API_CONTRACT: ContractEndpoint[] = [
     path: '/api/imports/invoices/template',
     group: 'public',
     surfaces: BOTH,
-    auth: 'public',
+    auth: 'none',
     summary: 'Download the canonical invoice import CSV template.',
     responseKind: 'raw',
     responses: [200],
