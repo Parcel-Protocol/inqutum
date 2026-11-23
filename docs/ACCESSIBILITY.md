@@ -33,6 +33,10 @@ the manual pass below for any change to these screens.
   fields get `aria-invalid="true"` and `aria-describedby` pointing at a
   `.field-error` paragraph. On submit, focus moves to the first invalid field.
   Toasts are only for outcomes (created / failed), not field validation.
+  `resolveInvoiceFormOutcome` keeps that field contract and adds the submit
+  outcome: success, `VALIDATION_FAILED` (not retryable), or a degraded
+  `API_UNREACHABLE` dependency (retryable, nothing saved).
+  `classifyInvoiceFormFailure` maps a thrown create error onto the same codes.
 - **Focus:** `*:focus-visible` draws a solid `--teal` ring (≥3:1 against paper
   and white). Do not remove it with `outline: none` without a replacement.
 - **Contrast:** white text sits on `--teal` (#0f766e, ~5.5:1), not on
