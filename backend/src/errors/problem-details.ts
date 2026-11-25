@@ -179,17 +179,17 @@ export function toProblemDetails(
     failure.error?.length ? failure.error : (taxonomyEntry?.userSafeMessage ?? 'An unexpected error occurred'),
   );
 
-  const resolvedRecovery =
-    failure.recoveryAction ||
-    taxonomyEntry?.recoveryAction ||
-    '';
+  const resolvedRecovery = redactErrorMessage(
+    failure.recoveryAction || taxonomyEntry?.recoveryAction || '',
+  );
 
-  const resolvedRemediation: string[] | undefined =
-    failure.remediation?.length
-      ? failure.remediation
-      : taxonomyEntry?.remediation?.length
-        ? taxonomyEntry.remediation
-        : undefined;
+  const remediationSource = failure.remediation?.length
+    ? failure.remediation
+    : taxonomyEntry?.remediation;
+
+  const resolvedRemediation: string[] | undefined = remediationSource?.length
+    ? remediationSource.map((step) => redactErrorMessage(step))
+    : undefined;
 
   const resolvedCategory: ErrorCategory | string =
     failure.category ||
@@ -227,7 +227,13 @@ export function toProblemDetails(
   }
 
   if (failure.fieldErrors?.length) {
-    doc.fieldErrors = failure.fieldErrors;
+    doc.fieldErrors = failure.fieldErrors.map((fieldError) => ({
+      ...fieldError,
+      message: redactErrorMessage(fieldError.message),
+      ...(fieldError.hint !== undefined
+        ? { hint: redactErrorMessage(fieldError.hint) }
+        : {}),
+    }));
   }
 
   return doc;

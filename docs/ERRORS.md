@@ -217,6 +217,21 @@ regenerating fails `backend/tests/error-remediation.test.ts`.
 
 <!-- END GENERATED CATALOG -->
 
+## Problem-details response redaction
+
+Every free-text field emitted by `toProblemDetails` is passed through the
+shared error-message redactor: `detail`, `recoveryAction`, each
+`remediation` step, and validation `fieldErrors.message` / `fieldErrors.hint`.
+This prevents credentials, Stellar secret seeds, and database URL passwords
+from bypassing redaction through guidance or validation metadata. Validation
+field names and machine-readable error codes remain unchanged; multiline
+messages are reduced to their first line by the shared redaction helper.
+
+This is a response-serialization hardening change only. It introduces no
+database changes, new response keys, or client migration. Rolling back the
+change restores the previous redaction behavior and does not require a data
+migration; clients continue to receive the same Problem Details shape.
+
 ## Operational edge cases
 
 **Horizon outage (`HORIZON_UNAVAILABLE`, 503, retryable).** Verification and

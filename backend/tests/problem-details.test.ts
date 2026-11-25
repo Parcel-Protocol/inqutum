@@ -325,6 +325,33 @@ describe('toProblemDetails — redaction', () => {
     });
     assert.ok(!doc.detail.includes('password'), 'DB password must not appear in detail');
   });
+
+  it('redacts secrets from recovery guidance, remediation, and validation details', () => {
+    const secretSeed = 'S' + 'B'.repeat(55);
+    const bearerToken = 'Bearer abc.def.ghi';
+    const doc = toProblemDetails({
+      success: false,
+      error: 'Request failed',
+      code: 'INTERNAL_ERROR',
+      recoveryAction: `Retry with ${bearerToken}`,
+      remediation: [`Use connection postgres://user:db-password@localhost:5432/app`],
+      fieldErrors: [{
+        field: 'credential',
+        code: 'INVALID_VALUE',
+        message: `Invalid secret ${secretSeed}`,
+        hint: `Authorization header: ${bearerToken}`,
+      }],
+    });
+
+    const serialized = JSON.stringify(doc);
+    assert.ok(!serialized.includes(secretSeed), 'Stellar secret seed must not appear anywhere in the document');
+    assert.ok(!serialized.includes('abc.def.ghi'), 'bearer token must not appear anywhere in the document');
+    assert.ok(!serialized.includes('db-password'), 'database password must not appear anywhere in the document');
+    assert.ok(doc.recoveryAction.includes('[REDACTED_TOKEN]'));
+    assert.ok(doc.remediation?.[0].includes('[REDACTED]'));
+    assert.ok(doc.fieldErrors?.[0].message.includes('[REDACTED_SECRET_KEY]'));
+    assert.ok(doc.fieldErrors?.[0].hint?.includes('[REDACTED_TOKEN]'));
+  });
 });
 
 // ---------------------------------------------------------------------------
