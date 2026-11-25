@@ -9,6 +9,10 @@
  *
  * These helpers are pure so the scoping rules can be tested without a wallet,
  * a backend or a browser.
+ *
+ * The hardened contract (dashboard-history-contract.js) provides additional
+ * validation, error classification, and degraded-dependency handling for the
+ * dashboard history boundary.
  */
 
 /** Invoice statuses the dashboard can filter by, plus the catch-all. */
